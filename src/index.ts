@@ -311,33 +311,33 @@ async function run() {
       if (unitA > unitC / bcPrice) {
         abAskAmount = unitC / bcPrice;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-        caBidAmount = unitC;
-        caBidPrice = (1 - PRICE_GAP / 100) * currentCaBidPrice;
         bcAskAmount = unitC / bcPrice;
         bcAskPrice = (1 + PRICE_GAP / 100) * currentBcAskPrice;
+        caBidAmount = unitC;
+        caBidPrice = (1 - PRICE_GAP / 100) * currentCaBidPrice;
       } else if (unitA < unitC / bcPrice) {
         abAskAmount = unitA;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-        caBidAmount = bcPrice * unitA;
-        caBidPrice = (1 - PRICE_GAP / 100) * currentCaBidPrice;
         bcAskAmount = unitA;
         bcAskPrice = (1 + PRICE_GAP / 100) * currentBcAskPrice;
+        caBidAmount = bcPrice * unitA;
+        caBidPrice = (1 - PRICE_GAP / 100) * currentCaBidPrice;
       }
     } else if (refSymbolIndex === 0) {
       if (unitB > unitC * caPrice) {
+        abAskAmount = (unitC * caPrice) / abPrice;
+        abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
         bcBidAmount = (unitC * caPrice) / abPrice;
         bcBidPrice = (1 - PRICE_GAP / 100) * currentBcBidPrice;
         caBidAmount = unitC * caPrice;
         caBidPrice = (1 - PRICE_GAP / 100) * currentCaBidPrice;
-        abAskAmount = (unitC * caPrice) / abPrice;
-        abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
       } else if (unitB < unitC * caPrice) {
+        abAskAmount = unitB / abPrice;
+        abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
         bcBidAmount = unitB / abPrice;
         bcBidPrice = (1 - PRICE_GAP / 100) * currentBcBidPrice;
         caBidAmount = unitB / caPrice;
         caBidPrice = (1 - PRICE_GAP / 100) * currentCaBidPrice;
-        abAskAmount = unitB / abPrice;
-        abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
       }
     }
   }
