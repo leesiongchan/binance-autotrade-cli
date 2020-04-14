@@ -1,0 +1,13 @@
+*.log
+.DS_Store
+.env
+dist
+node_modules
+
+# IDE - VSCode
+.vscode/*
+!.vscode/pnpify
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
