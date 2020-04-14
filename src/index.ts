@@ -340,6 +340,8 @@ async function run() {
         caBidPrice = (1 - PRICE_GAP / 100) * currentCaBidPrice;
       }
     }
+  } else {
+    console.log("No luck, please try again.");
   }
 
   console.log("======");
