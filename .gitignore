@@ -2,7 +2,6 @@
 .DS_Store
 .env
 dist
-node_modules
 
 # IDE - VSCode
 .vscode/*
@@ -11,3 +10,9 @@ node_modules
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Yarn
+.yarn/*
+!.yarn/cache
+!.yarn/releases
+!.yarn/plugins
