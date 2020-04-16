@@ -1,3 +1,8 @@
 {
-  "typescript.tsdk": ".vscode/pnpify/typescript/lib"
+  "files.exclude": {
+    ".vscode/pnpify": true,
+    ".yarn": true,
+    "node_modules": true
+  },
+  "typescript.tsdk": "node_modules/typescript/lib"
 }
