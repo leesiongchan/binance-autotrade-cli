@@ -5,7 +5,7 @@ import { BollingerBandsOutput } from "technicalindicators/declarations/volatilit
 import { ExchangeInfo, Symbol } from "binance-api-node";
 import { Observable, combineLatest } from "rxjs";
 import { first as _first, last as _last } from "lodash/fp";
-import { map, throttleTime, filter, pairwise, scan, bufferTime } from "rxjs/operators";
+import { map, throttleTime, filter, pairwise, bufferTime, shareReplay } from "rxjs/operators";
 
 import { SCREEN_UPDATE_INTERVAL } from "./constants";
 import {
@@ -115,7 +115,7 @@ function renderOrderTable(gui: GUIItems, options: GUIOptions) {
 
 function renderTradingInfoMarkdown(gui: GUIItems, options: GUIOptions) {
   const { tradingInfoMarkdown } = gui;
-  const { accountInfo$, candle$, orderBook$, tradingAssets$, tradingSymbols$, symbols } = options;
+  const { candle$, orderBook$, tradingAssets$, tradingSymbols$, symbols } = options;
 
   const mainSubscription = combineLatest(
     combineLatest(
@@ -144,13 +144,13 @@ function renderTradingInfoMarkdown(gui: GUIItems, options: GUIOptions) {
         );
       }),
     ),
-    combineLatest(accountInfo$, tradingAssets$, tradingSymbols$),
+    combineLatest(tradingAssets$, tradingSymbols$),
   )
     .pipe(throttleTime(1000))
     .subscribe(
-      ([tradingInfos, [accountInfo, tradingAssets, tradingSymbols]]: [
+      ([tradingInfos, [tradingAssets, tradingSymbols]]: [
         [[string, string], [string, string], BollingerBandsOutput, number][],
-        [TradingAccount, string[], Symbol[]],
+        [string[], Symbol[]],
       ]) => {
         const priceInfo = tradingInfos.map(([[prevAsk, ask], [prevBid, bid], bb, roc], i) => {
           const pair = tradingSymbols.find((ts) => ts.symbol === symbols[i])!;
@@ -164,17 +164,12 @@ BB : ${formatNumber(bb.lower)}/${formatNumber(bb.middle)}/${formatNumber(bb.uppe
 ROC: ${formatNumber(roc)}
 `;
         });
-        const balanceInfo = tradingAssets
-          .map((asset) => accountInfo.balances.find((b) => b.asset === asset)!)
-          .map((b) => `${b.asset} Balance: ${b.free}`);
 
         tradingInfoMarkdown.setMarkdown(`
 Triangle : ${tradingAssets.join("-")}
 ===
 
 ${priceInfo.join("\n")}
-
-${balanceInfo.join("\n")}
 `);
       },
     );
@@ -277,8 +272,8 @@ CB Price: ${formatNumber(cbPrice)}
 
 Price A     : ${formatNumber(priceA)}
 Price B     : ${formatNumber(priceB)}
-Profit Ratio: ${formatNumber(profitRatio)}
 BB Modifier : ${formatNumber(bbModifier)}
+Profit Ratio: ${formatNumber(profitRatio)}
 
 AB Amount: ${formatNumber(abAskAmount || "N/A")} | ${formatNumber(abBidAmount || "N/A")}
 AB Price : ${formatNumber(abAskPrice || "N/A")} | ${formatNumber(abBidPrice || "N/A")}
@@ -308,14 +303,14 @@ function loadGui(options: GUIOptions) {
     grid.set(0, 4, 4, 4, contrib.lcd, lcdOptions),
     grid.set(0, 8, 4, 4, contrib.lcd, lcdOptions),
   ];
-  const balanceTable = grid.set(4, 0, 10, 3, contrib.table, {
+  const balanceTable = grid.set(4, 0, 7, 3, contrib.table, {
     ...tableOptions,
     label: "My Balances",
     fg: "white",
     interactive: false,
     columnWidth: [6, 15],
   });
-  const orderTable = grid.set(4, 3, 10, 3, contrib.table, {
+  const orderTable = grid.set(4, 3, 7, 3, contrib.table, {
     label: "My Orders",
     fg: "white",
     interactive: false,
@@ -329,7 +324,7 @@ function loadGui(options: GUIOptions) {
     label: "Calculation Result",
     padding: { left: 2, right: 2 },
   } as contrib.Widgets.MarkdownOptions) as contrib.Widgets.MarkdownElement;
-  const serverLog: contrib.Widgets.LogElement = grid.set(14, 0, 4, 6, contrib.log, {
+  const serverLog: contrib.Widgets.LogElement = grid.set(11, 0, 7, 6, contrib.log, {
     label: "Server Log",
     fg: "green",
     interactive: false,
@@ -349,7 +344,7 @@ function loadGui(options: GUIOptions) {
   const calcResultMarkdownSubscriptions = renderCalcResultMarkdown(guiItems, options);
   const orderTableSubscriptions = renderOrderTable(guiItems, options);
   const priceLcdSubscriptions = renderPriceLcds(guiItems, options);
-  const tradingInforMarkdownSubscriptions = renderTradingInfoMarkdown(guiItems, options);
+  const tradingInfoMarkdownSubscriptions = renderTradingInfoMarkdown(guiItems, options);
 
   setInterval(() => {
     screen.render();
@@ -368,7 +363,7 @@ function loadGui(options: GUIOptions) {
     priceLcdSubscriptions.forEach((subscription) => {
       subscription.unsubscribe();
     });
-    tradingInforMarkdownSubscriptions.forEach((subscription) => {
+    tradingInfoMarkdownSubscriptions.forEach((subscription) => {
       subscription.unsubscribe();
     });
     return process.exit(0);

@@ -8,7 +8,7 @@ import {
   OutboundAccountInfo,
   Trade,
 } from "binance-api-node";
-import { Observable, concat, from, interval } from "rxjs";
+import { Observable, concat, from, interval, combineLatest } from "rxjs";
 import { map, mergeMap, mergeMapTo, scan, distinctUntilChanged, shareReplay } from "rxjs/operators";
 import { uniq } from "lodash/fp";
 
@@ -162,10 +162,7 @@ function run() {
         volume: candle.volume,
       })),
     ),
-  ).pipe(
-    distinctUntilChanged((x, y) => x.close === y.close),
-    shareReplay(100),
-  );
+  ).pipe(shareReplay(200));
 
   const prices$ = concat(
     from(client.prices()),
@@ -213,6 +210,32 @@ function run() {
   const tradingAssets$ = tradingSymbols$
     .pipe(map((ts) => uniq(ts.flatMap((s) => [s.baseAsset, s.quoteAsset]))))
     .pipe(shareReplay(1));
+  // const tradingInfos$ = combineLatest(
+  //   ...symbols.map((symbol) => {
+  //     const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
+  //     const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
+  //     return combineLatest(
+  //       symbolOrderBook$.pipe(
+  //         map((b) => _first(b.asks.map((b) => b.price))),
+  //         filter(Boolean),
+  //         pairwise(),
+  //       ),
+  //       symbolOrderBook$.pipe(
+  //         map((b) => _first(b.bids.map((b) => b.price))),
+  //         filter(Boolean),
+  //         pairwise(),
+  //       ),
+  //       symbolCandle$.pipe(
+  //         bollingerBands(),
+  //         map((bb) => _last(bb)),
+  //       ),
+  //       symbolCandle$.pipe(
+  //         roc(),
+  //         map((roc) => _last(roc)),
+  //       ),
+  //     );
+  //   }),
+  // ).pipe(shareReplay(1));
 
   loadGui({
     accountInfo$,
@@ -224,6 +247,7 @@ function run() {
     symbols,
     trade$,
     tradingAssets$,
+    // tradingInfos$,
     tradingSymbols$,
   });
 }
