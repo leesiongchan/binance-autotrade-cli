@@ -8,8 +8,8 @@ import {
   OutboundAccountInfo,
   Trade,
 } from "binance-api-node";
-import { Observable, concat, from, interval, combineLatest } from "rxjs";
-import { map, mergeMap, mergeMapTo, scan, distinctUntilChanged, shareReplay } from "rxjs/operators";
+import { Observable, concat, from, interval } from "rxjs";
+import { map, mergeMap, mergeMapTo, scan, shareReplay, concatMap } from "rxjs/operators";
 import { uniq } from "lodash/fp";
 
 import client from "./utils/api-client";
@@ -106,7 +106,7 @@ function run() {
   const orderBook$ = concat(
     // Initial
     from(symbols.map((symbol) => client.book({ symbol, limit: 5 }))).pipe(
-      mergeMap((book) => book),
+      concatMap((book) => book),
       map<OrderBook, TradingOrderBook>((book, i) => ({ ...book, symbol: symbols[i] })),
     ),
     // WS
@@ -133,7 +133,7 @@ function run() {
         client.candles({ symbol, limit: CANDLE_SIZE, interval: CandleChartInterval.ONE_HOUR }),
       ),
     ).pipe(
-      mergeMap((candles) => from(candles)),
+      concatMap((candles) => from(candles)),
       mergeMap((candles, i) =>
         from(
           candles.map<TradingCandle>((c) => ({ ...c, symbol: symbols[i] })),
@@ -172,7 +172,7 @@ function run() {
   const trade$ = concat(
     // Initial
     from(symbols.map((symbol) => client.trades({ symbol, limit: TRADE_SIZE }))).pipe(
-      mergeMap((trades) => from(trades)),
+      concatMap((trades) => from(trades)),
       mergeMap((trades) =>
         from(
           trades.map<TradingTrade>((trade, i) => ({
@@ -210,32 +210,6 @@ function run() {
   const tradingAssets$ = tradingSymbols$
     .pipe(map((ts) => uniq(ts.flatMap((s) => [s.baseAsset, s.quoteAsset]))))
     .pipe(shareReplay(1));
-  // const tradingInfos$ = combineLatest(
-  //   ...symbols.map((symbol) => {
-  //     const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
-  //     const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
-  //     return combineLatest(
-  //       symbolOrderBook$.pipe(
-  //         map((b) => _first(b.asks.map((b) => b.price))),
-  //         filter(Boolean),
-  //         pairwise(),
-  //       ),
-  //       symbolOrderBook$.pipe(
-  //         map((b) => _first(b.bids.map((b) => b.price))),
-  //         filter(Boolean),
-  //         pairwise(),
-  //       ),
-  //       symbolCandle$.pipe(
-  //         bollingerBands(),
-  //         map((bb) => _last(bb)),
-  //       ),
-  //       symbolCandle$.pipe(
-  //         roc(),
-  //         map((roc) => _last(roc)),
-  //       ),
-  //     );
-  //   }),
-  // ).pipe(shareReplay(1));
 
   loadGui({
     accountInfo$,
@@ -247,7 +221,6 @@ function run() {
     symbols,
     trade$,
     tradingAssets$,
-    // tradingInfos$,
     tradingSymbols$,
   });
 }
