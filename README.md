@@ -4,7 +4,7 @@ This special tool is specially made for my lazy friend - Ohshi Tan. I hope he en
 
 ## Prerequisites
 
--   Node.js (>= 10)
+-   Node.js (>= 13)
 -   Yarn (>= 1.22.0)
 
 ### How to install Node.js?
