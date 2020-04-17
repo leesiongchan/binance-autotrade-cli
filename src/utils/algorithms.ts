@@ -1,6 +1,6 @@
 import { BollingerBandsOutput } from "technicalindicators/declarations/volatility/BollingerBands";
 
-import { PRICE_GAP, BB_MODIFY, PROFIT_MARGIN } from "../constants";
+import { PRICE_GAP, BB_MODIFIER, PROFIT_MARGIN } from "../constants";
 
 const getPrice = (ask: number, bid: number) => (ask + bid) / 2;
 
@@ -47,7 +47,7 @@ export function findBollingerBandsModifier(
   prices: number[],
   bollingerBands: BollingerBandsOutput[],
 ) {
-  let bbModifier = BB_MODIFY;
+  let bbModifier = BB_MODIFIER;
   const abBbModifier = calcBollingerBandsModifier(prices[0], bollingerBands[0]);
   const acBbModifier = calcBollingerBandsModifier(prices[1], bollingerBands[1]);
   const cbBbModifier = calcBollingerBandsModifier(prices[2], bollingerBands[2]);

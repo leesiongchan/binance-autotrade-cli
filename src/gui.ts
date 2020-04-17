@@ -159,7 +159,7 @@ function renderTradingInfoMarkdown(gui: GUIItems, options: GUIOptions) {
           return `
 _${formatSymbol(pair)}_
 Ask: ${askColor(formatNumber(ask))} (${askColor(formatNumber(Number(ask) - Number(prevAsk)))})
-Bid: ${bidColor(formatNumber(bid))} (${askColor(formatNumber(Number(bid) - Number(prevBid)))})
+Bid: ${bidColor(formatNumber(bid))} (${bidColor(formatNumber(Number(bid) - Number(prevBid)))})
 BB : ${formatNumber(bb.lower)}/${formatNumber(bb.middle)}/${formatNumber(bb.upper)}
 ROC: ${formatNumber(roc)}
 `;
