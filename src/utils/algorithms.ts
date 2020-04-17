@@ -5,7 +5,7 @@ import { PRICE_GAP, BB_MODIFY, PROFIT_MARGIN } from "../constants";
 const getPrice = (ask: number, bid: number) => (ask + bid) / 2;
 
 export function calcBollingerBandsModifier(price: number, bb: BollingerBandsOutput) {
-  return 1 + 2 * ((price - bb.lower) / (bb.upper - bb.lower) - 0.5);
+  return 1 + 2 * Math.abs((price - bb.lower) / (bb.upper - bb.lower) - 0.5);
 }
 
 export function calcProfitRatio(prices: number[], bollingerBands: BollingerBandsOutput[]) {
@@ -134,15 +134,15 @@ export function findArbitrage({
         abBidPrice = (1 - PRICE_GAP / 100) * currentAbBidPrice;
         acAskAmount = unitA;
         acAskPrice = (1 + PRICE_GAP / 100) * currentAcAskPrice;
-        cbBidAmount = unitA * acPrice;
-        cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
+        cbAskAmount = unitA * acPrice;
+        cbAskPrice = (1 + PRICE_GAP / 100) * currentCbAskPrice;
       } else if (unitB / abPrice < unitA) {
         abBidAmount = unitB / abPrice;
         abBidPrice = (1 - PRICE_GAP / 100) * currentAbBidPrice;
         acAskAmount = unitB / abPrice;
         acAskPrice = (1 + PRICE_GAP / 100) * currentAcAskPrice;
-        cbBidAmount = (unitB / abPrice) * acPrice;
-        cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
+        cbAskAmount = (unitB / abPrice) * acPrice;
+        cbAskPrice = (1 + PRICE_GAP / 100) * currentCbAskPrice;
       }
     } else if (refSymbolIndex === 1) {
       if (unitB < unitC * cbPrice) {
@@ -150,15 +150,15 @@ export function findArbitrage({
         abBidPrice = (1 - PRICE_GAP / 100) * currentAbBidPrice;
         cbAskAmount = unitA * acPrice;
         cbAskPrice = (1 + PRICE_GAP / 100) * currentCbAskPrice;
-        acBidAmount = unitB / abPrice;
-        acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
+        acAskAmount = unitB / abPrice;
+        acAskPrice = (1 + PRICE_GAP / 100) * currentAcAskPrice;
       } else if (unitB > unitC * cbPrice) {
         abBidAmount = (unitC * cbPrice) / abPrice;
         abBidPrice = (1 - PRICE_GAP / 100) * currentAbBidPrice;
         cbAskAmount = unitC;
         cbAskPrice = (1 + PRICE_GAP / 100) * currentCbAskPrice;
-        acBidAmount = (unitC * cbPrice) / abPrice;
-        acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
+        acAskAmount = (unitC * cbPrice) / abPrice;
+        acAskPrice = (1 + PRICE_GAP / 100) * currentAcAskPrice;
       }
     } else if (refSymbolIndex === 0) {
       if (unitA * acPrice > unitC) {
@@ -184,46 +184,46 @@ export function findArbitrage({
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
         acBidAmount = unitC / acPrice;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
-        cbAskAmount = unitC;
-        cbAskPrice = (1 + PRICE_GAP / 100) * currentCbAskPrice;
+        cbBidAmount = unitC;
+        cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
       } else if (unitC / acPrice > unitA) {
         abAskAmount = unitA;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
         acBidAmount = unitA;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
-        cbAskAmount = unitA * acPrice;
-        cbAskPrice = (1 + PRICE_GAP / 100) * currentCbAskPrice;
+        cbBidAmount = unitA * acPrice;
+        cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
       }
     } else if (refSymbolIndex === 1) {
-      if (unitA > unitC / acPrice) {
-        abAskAmount = unitC / acPrice;
-        abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-        cbBidAmount = unitC;
-        cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
-        acAskAmount = unitC / acPrice;
-        acAskPrice = (1 + PRICE_GAP / 100) * currentAcAskPrice;
-      } else if (unitA < unitC / acPrice) {
+      if (unitB > unitA*abPrice) {
         abAskAmount = unitA;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-        cbBidAmount = acPrice * unitA;
+        cbBidAmount = unitA*abPrice/cbPrice;
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
-        acAskAmount = unitA;
-        acAskPrice = (1 + PRICE_GAP / 100) * currentAcAskPrice;
+        acBidAmount = unitA;
+        acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
+      } else if (unitB < unitA*abPrice) {
+        abAskAmount = unitB/abPrice;
+        abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
+        cbBidAmount = unitB/cbPrice;
+        cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
+        acBidAmount = unitB/abPrice;
+        acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
       }
     } else if (refSymbolIndex === 0) {
-      if (unitB > unitC * cbPrice) {
-        acBidAmount = (unitC * cbPrice) / abPrice;
+      if (unitC > unitA*acPrice) {
+        acBidAmount = unitA;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
-        cbBidAmount = unitC * cbPrice;
+        cbBidAmount = unitA*acPrice;
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
-        abAskAmount = (unitC * cbPrice) / abPrice;
+        abAskAmount = unitA;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-      } else if (unitB < unitC * cbPrice) {
-        acBidAmount = unitB / abPrice;
+      } else if (unitC < unitA*acPrice) {
+        acBidAmount = unitC/acPrice;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
-        cbBidAmount = unitB / cbPrice;
+        cbBidAmount = unitC;
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
-        abAskAmount = unitB / abPrice;
+        abAskAmount = unitC/abPrice;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
       }
     }
