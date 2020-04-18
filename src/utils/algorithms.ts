@@ -13,7 +13,13 @@ export function calcProfitRatio(prices: number[], bollingerBands: BollingerBands
   return (PROFIT_MARGIN / 100) * bbModifier;
 }
 
-export function collectDataForArbitrageCalculation(orderBooks: { ask: number; bid: number }[]) {
+export function collectDataForArbitrageCalculation({
+  orderBooks,
+  prices,
+}: {
+  orderBooks: { ask: number; bid: number }[];
+  prices: number[];
+}) {
   const currentAbAskPrice = orderBooks[0].ask;
   const currentAbBidPrice = orderBooks[0].bid;
   const currentAcAskPrice = orderBooks[1].ask;
@@ -21,9 +27,10 @@ export function collectDataForArbitrageCalculation(orderBooks: { ask: number; bi
   const currentCbAskPrice = orderBooks[2].ask;
   const currentCbBidPrice = orderBooks[2].bid;
 
-  const abPrice = getPrice(currentAbAskPrice, currentAbBidPrice);
-  const acPrice = getPrice(currentAcAskPrice, currentAcBidPrice);
-  const cbPrice = getPrice(currentCbAskPrice, currentCbBidPrice);
+  // const abPrice = getPrice(currentAbAskPrice, currentAbBidPrice);
+  // const acPrice = getPrice(currentAcAskPrice, currentAcBidPrice);
+  // const cbPrice = getPrice(currentCbAskPrice, currentCbBidPrice);
+  const [abPrice, acPrice, cbPrice] = prices;
 
   const priceA = abPrice;
   const priceB = acPrice * cbPrice;
@@ -84,11 +91,13 @@ export function findArbitrage({
   bollingerBands,
   balances,
   orderBooks,
+  prices,
   refSymbolIndex,
 }: {
   balances: number[];
   bollingerBands: BollingerBandsOutput[];
   orderBooks: { ask: number; bid: number }[];
+  prices: number[];
   refSymbolIndex: number;
 }) {
   const {
@@ -103,11 +112,9 @@ export function findArbitrage({
     cbPrice,
     priceA,
     priceB,
-  } = collectDataForArbitrageCalculation(orderBooks);
+  } = collectDataForArbitrageCalculation({ orderBooks, prices });
 
-  const unitA = balances[0];
-  const unitB = balances[1];
-  const unitC = balances[2];
+  const [unitA, unitB, unitC] = balances;
 
   // check ref symbol > check bollinger % > modify profit ratio > check trade conditions
   const profitRatio = calcProfitRatio([abPrice, acPrice, cbPrice], bollingerBands);
@@ -195,35 +202,35 @@ export function findArbitrage({
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
       }
     } else if (refSymbolIndex === 1) {
-      if (unitB > unitA*abPrice) {
+      if (unitB > unitA * abPrice) {
         abAskAmount = unitA;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-        cbBidAmount = unitA*abPrice/cbPrice;
+        cbBidAmount = (unitA * abPrice) / cbPrice;
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
         acBidAmount = unitA;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
-      } else if (unitB < unitA*abPrice) {
-        abAskAmount = unitB/abPrice;
+      } else if (unitB < unitA * abPrice) {
+        abAskAmount = unitB / abPrice;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-        cbBidAmount = unitB/cbPrice;
+        cbBidAmount = unitB / cbPrice;
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
-        acBidAmount = unitB/abPrice;
+        acBidAmount = unitB / abPrice;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
       }
     } else if (refSymbolIndex === 0) {
-      if (unitC > unitA*acPrice) {
+      if (unitC > unitA * acPrice) {
         acBidAmount = unitA;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
-        cbBidAmount = unitA*acPrice;
+        cbBidAmount = unitA * acPrice;
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
         abAskAmount = unitA;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
-      } else if (unitC < unitA*acPrice) {
-        acBidAmount = unitC/acPrice;
+      } else if (unitC < unitA * acPrice) {
+        acBidAmount = unitC / acPrice;
         acBidPrice = (1 - PRICE_GAP / 100) * currentAcBidPrice;
         cbBidAmount = unitC;
         cbBidPrice = (1 - PRICE_GAP / 100) * currentCbBidPrice;
-        abAskAmount = unitC/abPrice;
+        abAskAmount = unitC / abPrice;
         abAskPrice = (1 + PRICE_GAP / 100) * currentAbAskPrice;
       }
     }

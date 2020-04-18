@@ -25,7 +25,7 @@ export const bollingerBands = () =>
       (candles, candle) => updateValuesBasedOnTime(candles, candle, "closeTime"),
       [],
     ),
-    map((candles) => candles.slice(-BB_PERIOD * 3)),
+    map((candles) => candles.slice(-BB_PERIOD * 5)),
     map((candles) =>
       findBollingerBands({
         values: candles.map((c) => Number(c.close)),
@@ -41,6 +41,6 @@ export const roc = () =>
       (candles, candle) => updateValuesBasedOnTime(candles, candle, "closeTime"),
       [],
     ),
-    map((candles) => candles.slice(-ROC_PERIOD * 3)),
+    map((candles) => candles.slice(-ROC_PERIOD * 5)),
     map((candles) => findRoc({ values: candles.map((c) => Number(c.close)), period: ROC_PERIOD })),
   );

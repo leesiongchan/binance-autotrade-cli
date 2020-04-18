@@ -63,7 +63,7 @@ function renderPriceLcds(gui: GUIItems, options: GUIOptions) {
     ),
     tradingSymbols$,
   )
-    .pipe(throttleTime(1000))
+    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
     .subscribe(([prices, tradingSymbols]) => {
       prices.forEach(([prevPrice, price], i) => {
         const priceColor = prevPrice > price ? chalk.redBright : chalk.greenBright;
@@ -84,7 +84,7 @@ function renderBalanceTable(gui: GUIItems, options: GUIOptions) {
   const { accountInfo$, tradingAssets$ } = options;
 
   const mainSubscription = combineLatest(accountInfo$, tradingAssets$)
-    .pipe(throttleTime(1000))
+    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
     .subscribe(([accountInfo, tradingAssets]) => {
       balanceTable.setData({
         headers: [" Asset", " Quantity"],
@@ -102,7 +102,7 @@ function renderOrderTable(gui: GUIItems, options: GUIOptions) {
   const { order$ } = options;
 
   const mainSubscription = combineLatest(order$.pipe(bufferTime(1000)))
-    .pipe(throttleTime(1000))
+    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
     .subscribe(([orders]) => {
       balanceTable.setData({
         headers: [" Pair", " Price", " QTY", " Side"],
@@ -146,7 +146,7 @@ function renderTradingInfoMarkdown(gui: GUIItems, options: GUIOptions) {
     ),
     combineLatest(tradingAssets$, tradingSymbols$),
   )
-    .pipe(throttleTime(1000))
+    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
     .subscribe(
       ([tradingInfos, [tradingAssets, tradingSymbols]]: [
         [[string, string], [string, string], BollingerBandsOutput, number][],
@@ -166,7 +166,7 @@ ROC: ${formatNumber(roc)}
         });
 
         tradingInfoMarkdown.setMarkdown(`
-Triangle : ${tradingAssets.join("-")}
+Triangle: ${tradingAssets.join("-")}
 ===
 
 ${priceInfo.join("\n")}
@@ -208,7 +208,7 @@ function renderCalcResultMarkdown(gui: GUIItems, options: GUIOptions) {
     ),
     combineLatest(accountInfo$, tradingAssets$, tradingSymbols$),
   )
-    .pipe(throttleTime(1000))
+    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
     .subscribe(
       ([tradingInfos, [accountInfo, tradingAssets, tradingSymbols]]: [
         [string, string, BollingerBandsOutput, number][],
@@ -328,6 +328,7 @@ function loadGui(options: GUIOptions) {
     label: "Server Log",
     fg: "green",
     interactive: false,
+    padding: { left: 2, right: 2 },
   } as contrib.Widgets.LogOptions);
 
   const guiItems = {
