@@ -35,6 +35,9 @@ export function collectDataForArbitrageCalculation({
   const priceA = abPrice;
   const priceB = acPrice * cbPrice;
 
+  const scenarioA = currentAbBidPrice / currentAcAskPrice / currentCbAskPrice;
+  const scenarioB = currentAbAskPrice / currentAcBidPrice / currentCbBidPrice;
+
   return {
     currentAbAskPrice,
     currentAbBidPrice,
@@ -47,6 +50,8 @@ export function collectDataForArbitrageCalculation({
     cbPrice,
     priceA,
     priceB,
+    scenarioA,
+    scenarioB,
   };
 }
 
@@ -112,6 +117,8 @@ export function findArbitrage({
     cbPrice,
     priceA,
     priceB,
+    scenarioA,
+    scenarioB,
   } = collectDataForArbitrageCalculation({ orderBooks, prices });
 
   const [unitA, unitB, unitC] = balances;
@@ -134,7 +141,7 @@ export function findArbitrage({
 
   let result = true;
 
-  if (priceA / priceB < 1 - profitRatio) {
+  if (scenarioA < 1 - profitRatio) {
     if (refSymbolIndex === 2) {
       if (unitB / abPrice > unitA) {
         abBidAmount = unitA;
@@ -184,7 +191,7 @@ export function findArbitrage({
         abBidPrice = (1 - PRICE_GAP / 100) * currentAbBidPrice;
       }
     }
-  } else if (priceA / priceB > 1 + profitRatio) {
+  } else if (scenarioB > 1 + profitRatio) {
     if (refSymbolIndex === 2) {
       if (unitA > unitC / acPrice) {
         abAskAmount = unitC / acPrice;
