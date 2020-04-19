@@ -1,6 +1,6 @@
 import { findArbitrage } from "../algorithms";
 
-const abPrice = "7037.25000000";
+const abPrice = "7050.0000";
 const abBb = {
   middle: 7052.6395,
   upper: 7131.631825317084,
@@ -8,11 +8,11 @@ const abBb = {
   pb: 0.40258863795802236,
 };
 const abBook = {
-  ask: { price: "7036.62000000", quantity: "2.39642500" },
-  bid: { price: "7035.31000000", quantity: "4.00000000" },
+  ask: { price: "7051.000000", quantity: "2.39642500" },
+  bid: { price: "7049.000000", quantity: "4.00000000" },
 };
 
-const acPrice = "7045.92000000";
+const acPrice = "7070.000";
 const acBb = {
   middle: 7062.5725,
   upper: 7143.950735388831,
@@ -20,8 +20,8 @@ const acBb = {
   pb: 0.3976845595113157,
 };
 const acBook = {
-  ask: { price: "7044.47000000", quantity: "0.04049700" },
-  bid: { price: "7042.50000000", quantity: "0.06322200" },
+  ask: { price: "7071.000000", quantity: "2.04049700" },
+  bid: { price: "7069.000000", quantity: "2.06322200" },
 };
 
 const cbPrice = "0.99900000";
@@ -32,14 +32,14 @@ const cbBb = {
   pb: 0.9087412629466609,
 };
 const cbBook = {
-  ask: { price: "0.99940000", quantity: "118432.71000000" },
-  bid: { price: "0.99850000", quantity: "63697.92000000" },
+  ask: { price: "0.99910000", quantity: "118432.71000000" },
+  bid: { price: "0.99890000", quantity: "63697.92000000" },
 };
 
 describe("findArbitrage", () => {
   describe("ref pair is AB", () => {
     it("should return the result", async () => {
-      const balances = [1, 1, 1];
+      const balances = [1.5, 5000, 6000];
       const bollingerBands = [abBb, acBb, cbBb];
       const orderBooks = [
         { ask: Number(abBook.ask.price), bid: Number(abBook.ask.price) },
@@ -49,7 +49,14 @@ describe("findArbitrage", () => {
       const prices = [Number(abPrice), Number(acPrice), Number(cbPrice)];
       const refSymbolIndex = 0;
 
-      const { abAskAmount, result } = findArbitrage({
+      const { abBidAmount, result } = findArbitrage({
+        balances,
+        bollingerBands,
+        orderBooks,
+        prices,
+        refSymbolIndex,
+      });
+      const { acAskAmount, result } = findArbitrage({
         balances,
         bollingerBands,
         orderBooks,
@@ -57,9 +64,19 @@ describe("findArbitrage", () => {
         refSymbolIndex,
       });
 
-      expect(abAskAmount).toBe(1234);
+      const { cbAskAmount, result } = findArbitrage({
+        balances,
+        bollingerBands,
+        orderBooks,
+        prices,
+        refSymbolIndex,
+      });
+      
+      expect(abBidAmount).toBe(0.7092);
+      expect(acAskAmount).toBe(0.7092);
+      expect(cbAskAmount).toBe(5014.5);
       // And more...
-      expect(result).toBeTruthy();
+      //expect(result).toBeTruthy();
     });
   });
 });
