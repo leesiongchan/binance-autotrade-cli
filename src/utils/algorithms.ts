@@ -4,94 +4,6 @@ import { PRICE_GAP, BB_MODIFIER, PROFIT_MARGIN } from "../constants";
 
 const getPrice = (ask: number, bid: number) => (ask + bid) / 2;
 
-export function calcBollingerBandsModifier(price: number, bb: BollingerBandsOutput) {
-  return 1 + 2 * Math.abs((price - bb.lower) / (bb.upper - bb.lower) - 0.5);
-}
-
-export function calcProfitRatio(prices: number[], bollingerBands: BollingerBandsOutput[]) {
-  const bbModifier = findBollingerBandsModifier(prices, bollingerBands);
-  return (PROFIT_MARGIN / 100) * bbModifier;
-}
-
-export function collectDataForArbitrageCalculation({
-  orderBooks,
-  prices,
-}: {
-  orderBooks: { ask: number; bid: number }[];
-  prices: number[];
-}) {
-  const currentAbAskPrice = orderBooks[0].ask;
-  const currentAbBidPrice = orderBooks[0].bid;
-  const currentAcAskPrice = orderBooks[1].ask;
-  const currentAcBidPrice = orderBooks[1].bid;
-  const currentCbAskPrice = orderBooks[2].ask;
-  const currentCbBidPrice = orderBooks[2].bid;
-
-  // const abPrice = getPrice(currentAbAskPrice, currentAbBidPrice);
-  // const acPrice = getPrice(currentAcAskPrice, currentAcBidPrice);
-  // const cbPrice = getPrice(currentCbAskPrice, currentCbBidPrice);
-  const [abPrice, acPrice, cbPrice] = prices;
-
-  const priceA = abPrice;
-  const priceB = acPrice * cbPrice;
-
-  const scenarioA = currentAbBidPrice / currentAcAskPrice / currentCbAskPrice;
-  const scenarioB = currentAbAskPrice / currentAcBidPrice / currentCbBidPrice;
-
-  return {
-    currentAbAskPrice,
-    currentAbBidPrice,
-    currentAcAskPrice,
-    currentAcBidPrice,
-    currentCbAskPrice,
-    currentCbBidPrice,
-    abPrice,
-    acPrice,
-    cbPrice,
-    priceA,
-    priceB,
-    scenarioA,
-    scenarioB,
-  };
-}
-
-export function findBollingerBandsModifier(
-  prices: number[],
-  bollingerBands: BollingerBandsOutput[],
-) {
-  let bbModifier = BB_MODIFIER;
-  const abBbModifier = calcBollingerBandsModifier(prices[0], bollingerBands[0]);
-  const acBbModifier = calcBollingerBandsModifier(prices[1], bollingerBands[1]);
-  const cbBbModifier = calcBollingerBandsModifier(prices[2], bollingerBands[2]);
-
-  if (abBbModifier > acBbModifier && abBbModifier > cbBbModifier) {
-    bbModifier = abBbModifier;
-  } else if (acBbModifier > abBbModifier && acBbModifier > cbBbModifier) {
-    bbModifier = acBbModifier;
-  } else if (cbBbModifier > abBbModifier && cbBbModifier > acBbModifier) {
-    bbModifier = cbBbModifier;
-  } else {
-    throw new Error("Bollinger Bands Modifier calculation is invalid.");
-  }
-
-  return bbModifier;
-}
-
-export function findReferenceSymbol(
-  ab: { roc: number; symbol: string },
-  bc: { roc: number; symbol: string },
-  ca: { roc: number; symbol: string },
-): string {
-  if (ab.roc < bc.roc && ab.roc < ca.roc) {
-    return ab.symbol;
-  } else if (bc.roc < ab.roc && bc.roc < ca.roc) {
-    return bc.symbol;
-  } else if (ca.roc < ab.roc && ca.roc < bc.roc) {
-    return ca.symbol;
-  }
-  throw new Error("Reference symbol cannot be found");
-}
-
 export function findArbitrage({
   bollingerBands,
   balances,
@@ -121,6 +33,11 @@ export function findArbitrage({
     scenarioB,
   } = collectDataForArbitrageCalculation({ orderBooks, prices });
 
+  // dimension check:
+  if (abPrice/acPrice/cbPrice > 1.5 || abPrice/acPrice/cbPrice < 0.95)
+    throw new Error(" Wrong pairs or pair sequence inserted. please check pairs dimensions.");
+    
+
   const [unitA, unitB, unitC] = balances;
 
   // check ref symbol > check bollinger % > modify profit ratio > check trade conditions
@@ -140,6 +57,12 @@ export function findArbitrage({
   let cbBidPrice: number | null = null;
 
   let result = true;
+  //console.log(scenarioA);
+  //console.log(scenarioB);
+  //console.log(1+profitRatio);
+
+  console.log(currentAbBidPrice);
+  console.log(currentAbAskPrice);
 
   if (scenarioA < 1 - profitRatio) {
     if (refSymbolIndex === 2) {
@@ -245,6 +168,16 @@ export function findArbitrage({
     result = false;
   }
 
+
+  console.log(abAskAmount);
+
+  console.log(acBidAmount);
+
+  console.log(cbBidAmount);
+
+  //console.log(acAskPrice);
+  //console.log(cbAskAmount);
+  //console.log(cbAskPrice);
   return {
     abAskAmount,
     abAskPrice,
@@ -261,3 +194,96 @@ export function findArbitrage({
     result,
   };
 }
+
+
+export function calcBollingerBandsModifier(price: number, bb: BollingerBandsOutput) {
+  return 1 + 2 * Math.abs((price - bb.lower) / (bb.upper - bb.lower) - 0.5);
+}
+
+export function calcProfitRatio(prices: number[], bollingerBands: BollingerBandsOutput[]) {
+  const bbModifier = findBollingerBandsModifier(prices, bollingerBands);
+  return (PROFIT_MARGIN / 100) * bbModifier;
+}
+
+export function collectDataForArbitrageCalculation({
+  orderBooks,
+  prices,
+}: {
+  orderBooks: { ask: number; bid: number }[];
+  prices: number[];
+}) {
+  const currentAbAskPrice = orderBooks[0].ask;
+  const currentAbBidPrice = orderBooks[0].bid;
+  const currentAcAskPrice = orderBooks[1].ask;
+  const currentAcBidPrice = orderBooks[1].bid;
+  const currentCbAskPrice = orderBooks[2].ask;
+  const currentCbBidPrice = orderBooks[2].bid;
+
+  // const abPrice = getPrice(currentAbAskPrice, currentAbBidPrice);
+  // const acPrice = getPrice(currentAcAskPrice, currentAcBidPrice);
+  // const cbPrice = getPrice(currentCbAskPrice, currentCbBidPrice);
+  const [abPrice, acPrice, cbPrice] = prices;
+
+  const priceA = abPrice;
+  const priceB = acPrice * cbPrice;
+
+  const scenarioA = currentAbBidPrice / currentAcAskPrice / currentCbAskPrice;
+  const scenarioB = currentAbAskPrice / currentAcBidPrice / currentCbBidPrice;
+
+  return {
+    currentAbAskPrice,
+    currentAbBidPrice,
+    currentAcAskPrice,
+    currentAcBidPrice,
+    currentCbAskPrice,
+    currentCbBidPrice,
+    abPrice,
+    acPrice,
+    cbPrice,
+    priceA,
+    priceB,
+    scenarioA,
+    scenarioB,
+  };
+}
+
+export function findBollingerBandsModifier(
+  prices: number[],
+  bollingerBands: BollingerBandsOutput[],
+) {
+  let bbModifier = BB_MODIFIER;
+  const abBbModifier = calcBollingerBandsModifier(prices[0], bollingerBands[0]);
+  const acBbModifier = calcBollingerBandsModifier(prices[1], bollingerBands[1]);
+  const cbBbModifier = calcBollingerBandsModifier(prices[2], bollingerBands[2]);
+
+  if (abBbModifier > acBbModifier && abBbModifier > cbBbModifier) {
+    bbModifier = abBbModifier;
+  } else if (acBbModifier > abBbModifier && acBbModifier > cbBbModifier) {
+    bbModifier = acBbModifier;
+  } else if (cbBbModifier > abBbModifier && cbBbModifier > acBbModifier) {
+    bbModifier = cbBbModifier;
+  } else {
+    throw new Error("Bollinger Bands Modifier calculation is invalid.");
+  }
+
+  return bbModifier;
+}
+
+export function findReferenceSymbol(
+  ab: { roc: number; symbol: string },
+  bc: { roc: number; symbol: string },
+  ca: { roc: number; symbol: string },
+): string {
+  if (ab.roc < bc.roc && ab.roc < ca.roc) {
+    return ab.symbol;
+  } else if (bc.roc < ab.roc && bc.roc < ca.roc) {
+    return bc.symbol;
+  } else if (ca.roc < ab.roc && ca.roc < bc.roc) {
+    return ca.symbol;
+  }
+  throw new Error("Reference symbol cannot be found");
+}
+
+
+
+
