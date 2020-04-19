@@ -1,6 +1,6 @@
 import { findArbitrage } from "../algorithms";
 
-const abPrice = "7077.0000";
+const abPrice = "7050.0000";
 const abBb = {
   middle: 7052.6395,
   upper: 7131.631825317084,
@@ -8,8 +8,8 @@ const abBb = {
   pb: 0.40258863795802236,
 };
 const abBook = {
-  ask: { price: "7077.000000", quantity: "2.39642500" },
-  bid: { price: "7066.000000", quantity: "4.00000000" },
+  ask: { price: "7051.000000", quantity: "2.39642500" },
+  bid: { price: "7049.000000", quantity: "4.00000000" },
 };
 
 const acPrice = "7070.000";
@@ -47,9 +47,9 @@ describe("findArbitrage", () => {
         { ask: Number(cbBook.ask.price), bid: Number(cbBook.bid.price) },
       ];
       const prices = [Number(abPrice), Number(acPrice), Number(cbPrice)];
-      const refSymbolIndex = 1;
+      const refSymbolIndex = 2;
 
-      const { abAskAmount, acBidAmount, cbBidAmount, result }  = findArbitrage({
+      const { abBidAmount, acAskAmount, cbAskAmount, result }  = findArbitrage({
         balances,
         bollingerBands,
         orderBooks,
@@ -58,9 +58,9 @@ describe("findArbitrage", () => {
       });
       
 
-      expect(abAskAmount).toBeCloseTo(0.8486);
-      expect(acBidAmount).toBeCloseTo(0.8486);
-      expect(cbBidAmount).toBeCloseTo(6000);
+      expect(abBidAmount).toBe(0.7092);
+      expect(acAskAmount).toBe(0.7092);
+      expect(cbAskAmount).toBe(5014.5);
       // And more...
       //expect(result).toBeTruthy();
     });
