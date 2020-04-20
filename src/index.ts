@@ -34,7 +34,7 @@ import { prompt } from "enquirer";
 
 import client from "./utils/api-client";
 import loadGui from "./gui";
-import { TRADE_SIZE, CANDLE_SIZE, ENABLE_GUI, ACCOUNT_TYPE } from "./constants";
+import { TRADE_SIZE, CANDLE_SIZE, ENABLE_GUI, ACCOUNT_TYPE, TEST_MODE } from "./constants";
 import {
   TradingAccount,
   TradingCandle,
@@ -329,8 +329,8 @@ async function run() {
         throw new Error("No arbitrage info for whatever reason?");
       }
       const newOrders: NewOrder[] = symbols.map((symbol, i) => ({
-        price: (ar[i].ask.price ?? ar[i].bid.price)?.toPrecision(4).toString(),
-        quantity: (ar[i].ask.quantity ?? ar[i].bid.quantity)?.toPrecision(4).toString() || "",
+        price: (ar[i].ask.price ?? ar[i].bid.price)?.toFixed(4),
+        quantity: (ar[i].ask.quantity ?? ar[i].bid.quantity)?.toFixed(4) || "0",
         side: ar[i].ask.quantity ? "SELL" : "BUY",
         symbol,
         type: "LIMIT",
@@ -346,7 +346,25 @@ async function run() {
       let orders: Order[];
       isOrderInProgress$.next(true);
       try {
-        orders = await Promise.all(newOrders.map((newOrder) => client.orderTest(newOrder)));
+        orders = await Promise.all(
+          newOrders.map(async (newOrder) => {
+            const order = {
+              clientOrderId: newOrder.newClientOrderId,
+              executedQty: newOrder.quantity,
+              icebergQty: newOrder.icebergQty,
+              price: newOrder.price,
+              side: newOrder.side,
+              status: "NEW",
+              symbol: newOrder.symbol,
+              timeInForce: newOrder.timeInForce,
+              type: newOrder.type,
+            } as Order;
+            if (TEST_MODE) {
+              await client.orderTest(newOrder);
+            }
+            return order;
+          }),
+        );
       } finally {
         isOrderInProgress$.next(false);
       }
@@ -369,20 +387,17 @@ async function run() {
       withLatestFrom(tradingSymbols$),
       mergeMap(([orders, tradingSymbols]) =>
         orders.map((o) => {
-          if (_isEmpty(o)) {
-            return "Test new order creation successfully, but it does not return any value";
-          }
           const sideColor = o.side === "SELL" ? chalk.redBright : chalk.greenBright;
-          return `<${formatSymbol(
-            tradingSymbols.find((ts) => ts.symbol === o.symbol)!,
-          )}> [${sideColor(o.side)}] ${o.price} (${o.executedQty})`;
+          const symbol = `<${formatSymbol(tradingSymbols.find((ts) => ts.symbol === o.symbol)!)}>`;
+          const side = sideColor(`[${o.side}]`) + (o.side === "BUY" ? " " : "");
+          return `${side} ${symbol} P: ${o.price} | Q: ${o.executedQty}`;
         }),
       ),
     ),
   );
 
   let logger: any = console;
-  if (ENABLE_GUI) {
+  if (!ENABLE_GUI) {
     const { serverLog } = loadGui({
       accountInfo$,
       arbitrage$,
