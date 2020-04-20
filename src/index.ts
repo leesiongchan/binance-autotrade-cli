@@ -84,7 +84,9 @@ async function run() {
 
   const accountInfo$ = concat(
     // Initial
-    from(accountReq()).pipe(map<Account, TradingAccount>((ai) => ai)),
+    from(accountReq().then((a: any) => ({ ...a, balances: a.userAssets }))).pipe(
+      map<Account, TradingAccount>((ai) => ai),
+    ),
     // WS
     new Observable<OutboundAccountInfo>((subscriber) => {
       const ws = accountWs((msg) => {
@@ -404,9 +406,12 @@ async function run() {
             `${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${chalk.redBright(err)}`,
           ),
       ),
-      retry(),
+      // retry(),
     )
-    .subscribe();
+    .subscribe(
+      () => {},
+      (err) => console.log("err", err),
+    );
 }
 
 run();
