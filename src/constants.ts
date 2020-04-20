@@ -2,6 +2,7 @@ export const ACCOUNT_TYPE: "MARGIN" | "NORMAL" = "MARGIN";
 export const CANDLE_SIZE = 48;
 export const ENABLE_GUI = true;
 export const SCREEN_UPDATE_INTERVAL = 500;
+export const TEST_MODE = true;
 export const TICKTIME_THRESHOLD = 300;
 export const TRADE_SIZE = 20;
 

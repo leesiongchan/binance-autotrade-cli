@@ -70,13 +70,21 @@ async function run() {
 
   const response: any = await prompt(questions);
   const symbols: string[] = response.symbols;
-  const accountWs = ACCOUNT_TYPE === "MARGIN" ? client.ws.marginUser : client.ws.user;
+
+  let accountReq = client.accountInfo;
+  let accountWs = client.ws.user;
+  let allOrdersReq = client.allOrders;
+  let orderReq = client.order;
+  if (ACCOUNT_TYPE === "MARGIN") {
+    accountReq = client.marginAccountInfo;
+    accountWs = client.ws.marginUser;
+    allOrdersReq = client.marginAllOrders;
+    orderReq = client.marginOrder;
+  }
 
   const accountInfo$ = concat(
     // Initial
-    from(client.accountInfo({ useServerTime: true })).pipe(
-      map<Account, TradingAccount>((ai) => ai),
-    ),
+    from(accountReq()).pipe(map<Account, TradingAccount>((ai) => ai)),
     // WS
     new Observable<OutboundAccountInfo>((subscriber) => {
       const ws = accountWs((msg) => {
@@ -104,7 +112,7 @@ async function run() {
   );
   const order$ = concat(
     // Initial
-    from(symbols.map((symbol) => client.allOrders({ symbol, useServerTime: true }))).pipe(
+    from(symbols.map((symbol) => allOrdersReq({ symbol }))).pipe(
       mergeMap((orders) => orders),
       mergeMap((orders) => orders as TradingOrder[]),
     ),
