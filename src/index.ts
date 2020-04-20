@@ -1,27 +1,56 @@
+import * as chalk from "chalk";
+import * as deepEqual from "fast-deep-equal";
 import {
   Account,
   Candle,
   CandleChartInterval,
   Depth,
   ExecutionReport,
-  OrderBook,
+  NewOrder,
+  Order,
   OutboundAccountInfo,
+  Symbol,
   Trade,
 } from "binance-api-node";
-import { Observable, concat, from, interval } from "rxjs";
-import { map, mergeMap, mergeMapTo, scan, shareReplay, concatMap } from "rxjs/operators";
-import { uniq } from "lodash/fp";
+import { BollingerBandsOutput } from "technicalindicators/declarations/volatility/BollingerBands";
+import {
+  Observable,
+  concat,
+  from,
+  interval,
+  combineLatest,
+  merge,
+  of,
+  BehaviorSubject,
+} from "rxjs";
+import { first as _first, isEmpty as _isEmpty, last as _last, uniq as _uniq } from "lodash/fp";
+import { format as formatDate } from "date-fns/fp";
+import {
+  catchError,
+  concatMap,
+  distinctUntilChanged,
+  filter,
+  map,
+  mergeMap,
+  mergeMapTo,
+  scan,
+  shareReplay,
+  tap,
+} from "rxjs/operators";
 
 import client from "./utils/api-client";
 import loadGui from "./gui";
-import { TRADE_SIZE, CANDLE_SIZE } from "./constants";
+import { TRADE_SIZE, CANDLE_SIZE, ENABLE_GUI } from "./constants";
 import {
-  TradingCandle,
   TradingAccount,
+  TradingCandle,
   TradingOrder,
   TradingOrderBook,
   TradingTrade,
 } from "./interface";
+import { bollingerBands, roc } from "./utils/operators";
+import { findArbitrage, findReferenceSymbol } from "./utils/algorithms";
+import { formatSymbol } from "./utils/formatter";
 
 const TICKER_LIST = [
   ["BTCUSDT", "BTCBUSD", "BUSDUSDT"],
@@ -105,10 +134,10 @@ function run() {
 
   const orderBook$ = concat(
     // Initial
-    from(symbols.map((symbol) => client.book({ symbol, limit: 5 }))).pipe(
-      concatMap((book) => book),
-      map<OrderBook, TradingOrderBook>((book, i) => ({ ...book, symbol: symbols[i] })),
-    ),
+    // from(symbols.map((symbol) => client.book({ symbol, limit: 5 }))).pipe(
+    //   concatMap((book) => book),
+    //   map<OrderBook, TradingOrderBook>((book, i) => ({ ...book, symbol: symbols[i] })),
+    // ),
     // WS
     new Observable<Depth>((subscriber) => {
       const ws = client.ws.depth(symbols, (depth) => {
@@ -133,12 +162,8 @@ function run() {
         client.candles({ symbol, limit: CANDLE_SIZE, interval: CandleChartInterval.ONE_HOUR }),
       ),
     ).pipe(
-      concatMap((candles) => from(candles)),
-      mergeMap((candles, i) =>
-        from(
-          candles.map<TradingCandle>((c) => ({ ...c, symbol: symbols[i] })),
-        ),
-      ),
+      concatMap((candles) => candles),
+      mergeMap((candles, i) => candles.map<TradingCandle>((c) => ({ ...c, symbol: symbols[i] }))),
     ),
     // WS
     new Observable<Candle>((subscriber) => {
@@ -172,17 +197,15 @@ function run() {
   const trade$ = concat(
     // Initial
     from(symbols.map((symbol) => client.trades({ symbol, limit: TRADE_SIZE }))).pipe(
-      concatMap((trades) => from(trades)),
+      concatMap((trades) => trades),
       mergeMap((trades) =>
-        from(
-          trades.map<TradingTrade>((trade, i) => ({
-            id: trade.id,
-            price: trade.price,
-            quantity: trade.qty,
-            symbol: symbols[i],
-            time: trade.time,
-          })),
-        ),
+        trades.map<TradingTrade>((trade, i) => ({
+          id: trade.id,
+          price: trade.price,
+          quantity: trade.qty,
+          symbol: symbols[i],
+          time: trade.time,
+        })),
       ),
     ),
     // WS
@@ -204,25 +227,154 @@ function run() {
     ),
   ).pipe(shareReplay(1));
 
-  const tradingSymbols$ = exchangeInfo$
-    .pipe(map((ei) => ei.symbols.filter((s) => symbols.includes(s.symbol))))
-    .pipe(shareReplay(1));
-  const tradingAssets$ = tradingSymbols$
-    .pipe(map((ts) => uniq(ts.flatMap((s) => [s.baseAsset, s.quoteAsset]))))
-    .pipe(shareReplay(1));
+  const tradingSymbols$ = exchangeInfo$.pipe(
+    map((ei) => ei.symbols.filter((s) => symbols.includes(s.symbol))),
+    shareReplay(1),
+  );
+  const tradingAssets$ = tradingSymbols$.pipe(
+    map((ts) => _uniq(ts.flatMap((s) => [s.baseAsset, s.quoteAsset]))),
+    shareReplay(1),
+  );
 
-  loadGui({
-    accountInfo$,
-    candle$,
-    exchangeInfo$,
-    order$,
-    orderBook$,
-    prices$,
-    symbols,
-    trade$,
-    tradingAssets$,
-    tradingSymbols$,
-  });
+  const isOrderInProgress$ = new BehaviorSubject(false);
+  const arbitrage$ = combineLatest(
+    combineLatest(
+      ...symbols.map((symbol) => {
+        const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
+        const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
+        return combineLatest(
+          symbolOrderBook$.pipe(
+            map((b) => _first(b.asks.map((b) => b.price))),
+            filter(Boolean),
+          ),
+          symbolOrderBook$.pipe(
+            map((b) => _first(b.bids.map((b) => b.price))),
+            filter(Boolean),
+          ),
+          symbolCandle$.pipe(map((c) => c.close)),
+          symbolCandle$.pipe(
+            bollingerBands(),
+            map((bb) => _last(bb)),
+          ),
+          symbolCandle$.pipe(
+            roc(),
+            map((roc) => _last(roc)),
+          ),
+        );
+      }),
+    ),
+    combineLatest(accountInfo$, tradingAssets$, tradingSymbols$),
+    isOrderInProgress$.pipe(distinctUntilChanged()),
+  ).pipe(
+    filter(([, , b]) => b === false),
+    map(
+      ([tradingInfos, [accountInfo, tradingAssets, tradingSymbols]]: [
+        [string, string, string, BollingerBandsOutput, number][],
+        [TradingAccount, string[], Symbol[]],
+        boolean,
+      ]) => {
+        const rocs = tradingInfos.map(([, , , , roc], i) => ({ symbol: symbols[i], roc }));
+        const refSymbolStr = findReferenceSymbol(rocs[0], rocs[1], rocs[2]);
+        const refSymbolIndex = tradingSymbols.findIndex((ts) => ts.symbol === refSymbolStr);
+
+        const balances = tradingAssets.map((asset) => {
+          const balance = accountInfo.balances.find((b) => b.asset === asset)!;
+          return Number(balance.free) - Number(balance.locked);
+        });
+        const bollingerBands = tradingInfos.map((info) => info[3]);
+        const orderBooks = tradingInfos.map((info) => ({
+          ask: Number(info[0]),
+          bid: Number(info[1]),
+        }));
+        const prices = tradingInfos.map((info) => Number(info[2]));
+
+        return findArbitrage({
+          balances,
+          prices,
+          bollingerBands,
+          orderBooks,
+          refSymbolIndex,
+        });
+      },
+    ),
+    distinctUntilChanged(deepEqual),
+    shareReplay(1),
+  );
+  const execute$ = arbitrage$.pipe(
+    filter((ar) => ar !== null),
+    concatMap(async (ar) => {
+      if (!ar) {
+        throw new Error("No arbitrage info for whatever reason?");
+      }
+
+      const newOrders: NewOrder[] = symbols.map((symbol, i) => ({
+        price: (ar[i].ask.price ?? ar[i].bid.price)?.toPrecision(4).toString(),
+        quantity: (ar[i].ask.quantity ?? ar[i].bid.quantity)?.toPrecision(4).toString() || "",
+        side: ar[i].ask.quantity ? "SELL" : "BUY",
+        symbol,
+        type: "LIMIT",
+      }));
+
+      if (newOrders.some((newOrder) => !newOrder.price || Number(newOrder.quantity) <= 0)) {
+        throw new Error("You do not have enough quantity to arbitrage.");
+      }
+
+      let orders: Order[];
+      isOrderInProgress$.next(true);
+      try {
+        orders = await Promise.all(newOrders.map((newOrder) => client.orderTest(newOrder)));
+      } finally {
+        isOrderInProgress$.next(false);
+      }
+      return orders;
+    }),
+  );
+
+  const serverLog$ = merge(
+    arbitrage$.pipe(
+      map((arbitrageResult) => {
+        const logColor = !!arbitrageResult ? chalk.greenBright : chalk.redBright;
+        return logColor(
+          !!arbitrageResult
+            ? "Yay! Let's all-in now!"
+            : "No luck, I will keep trying in the background!",
+        );
+      }),
+    ),
+    combineLatest(execute$, tradingSymbols$).pipe(
+      mergeMap(([orders, tradingSymbols]) =>
+        orders.map((o) => {
+          if (_isEmpty(o)) {
+            return "Test new order creation successfully, but it does not return any value";
+          }
+          const sideColor = o.side === "SELL" ? chalk.redBright : chalk.greenBright;
+          return `<${formatSymbol(
+            tradingSymbols.find((ts) => ts.symbol === o.symbol)!,
+          )}> [${sideColor(o.side)}] ${o.price} (${o.executedQty})`;
+        }),
+      ),
+      catchError((err) => of(err)),
+    ),
+  ).pipe(map((log) => `${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${log}`));
+
+  if (ENABLE_GUI) {
+    loadGui({
+      accountInfo$,
+      arbitrage$,
+      candle$,
+      exchangeInfo$,
+      order$,
+      orderBook$,
+      prices$,
+      serverLog$,
+      symbols,
+      trade$,
+      tradingAssets$,
+      tradingSymbols$,
+    });
+  } else {
+    serverLog$.subscribe((log) => console.log(log));
+  }
 }
 
 run();

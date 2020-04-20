@@ -17,13 +17,13 @@ import {
 } from "./interface";
 import { bollingerBands, roc } from "./utils/operators";
 import {
+  ArbitrageResult,
   calcProfitRatio,
   collectDataForArbitrageCalculation,
-  findArbitrage,
   findBollingerBandsModifier,
   findReferenceSymbol,
 } from "./utils/algorithms";
-import { formatNumber, formatSymbol } from "./utils/formatter";
+import { formatNumber, formatSymbol, formatArbitrageItem } from "./utils/formatter";
 
 interface GUIItems {
   balanceTable: contrib.Widgets.TableElement;
@@ -36,16 +36,20 @@ interface GUIItems {
 
 interface GUIOptions {
   accountInfo$: Observable<TradingAccount>;
+  arbitrage$: Observable<ArbitrageResult>;
   candle$: Observable<TradingCandle>;
   exchangeInfo$: Observable<ExchangeInfo>;
   order$: Observable<TradingOrder>;
   orderBook$: Observable<TradingOrderBook>;
   prices$: Observable<{ [i: string]: string }>;
+  serverLog$: Observable<string>;
   symbols: string[];
   trade$: Observable<TradingTrade>;
   tradingAssets$: Observable<string[]>;
   tradingSymbols$: Observable<Symbol[]>;
 }
+
+const throttleTimeInterval = SCREEN_UPDATE_INTERVAL - 100;
 
 function renderPriceLcds(gui: GUIItems, options: GUIOptions) {
   const { priceLcds } = gui;
@@ -63,7 +67,7 @@ function renderPriceLcds(gui: GUIItems, options: GUIOptions) {
     ),
     tradingSymbols$,
   )
-    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
+    .pipe(throttleTime(throttleTimeInterval))
     .subscribe(([prices, tradingSymbols]) => {
       prices.forEach(([prevPrice, price], i) => {
         const priceColor = prevPrice > price ? chalk.redBright : chalk.greenBright;
@@ -84,7 +88,7 @@ function renderBalanceTable(gui: GUIItems, options: GUIOptions) {
   const { accountInfo$, tradingAssets$ } = options;
 
   const mainSubscription = combineLatest(accountInfo$, tradingAssets$)
-    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
+    .pipe(throttleTime(throttleTimeInterval))
     .subscribe(([accountInfo, tradingAssets]) => {
       balanceTable.setData({
         headers: [" Asset", " Quantity"],
@@ -102,7 +106,7 @@ function renderOrderTable(gui: GUIItems, options: GUIOptions) {
   const { order$ } = options;
 
   const mainSubscription = combineLatest(order$.pipe(bufferTime(1000)))
-    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
+    .pipe(throttleTime(throttleTimeInterval))
     .subscribe(([orders]) => {
       balanceTable.setData({
         headers: [" Pair", " Price", " QTY", " Side"],
@@ -146,7 +150,7 @@ function renderTradingInfoMarkdown(gui: GUIItems, options: GUIOptions) {
     ),
     combineLatest(tradingAssets$, tradingSymbols$),
   )
-    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
+    .pipe(throttleTime(throttleTimeInterval))
     .subscribe(
       ([tradingInfos, [tradingAssets, tradingSymbols]]: [
         [[string, string], [string, string], BollingerBandsOutput, number][],
@@ -178,8 +182,8 @@ ${priceInfo.join("\n")}
 }
 
 function renderCalcResultMarkdown(gui: GUIItems, options: GUIOptions) {
-  const { calcResultMarkdown, serverLog } = gui;
-  const { accountInfo$, candle$, orderBook$, tradingAssets$, tradingSymbols$, symbols } = options;
+  const { calcResultMarkdown } = gui;
+  const { arbitrage$, candle$, orderBook$, tradingSymbols$, symbols } = options;
 
   const mainSubscription = combineLatest(
     combineLatest(
@@ -195,6 +199,7 @@ function renderCalcResultMarkdown(gui: GUIItems, options: GUIOptions) {
             map((b) => _first(b.bids.map((b) => b.price))),
             filter(Boolean),
           ),
+          symbolCandle$.pipe(map((c) => c.close)),
           symbolCandle$.pipe(
             bollingerBands(),
             map((bb) => _last(bb)),
@@ -206,62 +211,37 @@ function renderCalcResultMarkdown(gui: GUIItems, options: GUIOptions) {
         );
       }),
     ),
-    combineLatest(accountInfo$, tradingAssets$, tradingSymbols$),
+    combineLatest(arbitrage$, tradingSymbols$),
   )
-    .pipe(throttleTime(SCREEN_UPDATE_INTERVAL))
+    .pipe(throttleTime(throttleTimeInterval))
     .subscribe(
-      ([tradingInfos, [accountInfo, tradingAssets, tradingSymbols]]: [
-        [string, string, BollingerBandsOutput, number][],
-        [TradingAccount, string[], Symbol[]],
+      ([tradingInfos, [arbitrageResult, tradingSymbols]]: [
+        [string, string, string, BollingerBandsOutput, number][],
+        [ArbitrageResult, Symbol[]],
       ]) => {
-        const rocs = tradingInfos.map(([, , , roc], i) => ({ symbol: symbols[i], roc }));
+        const rocs = tradingInfos.map(([, , , , roc], i) => ({ symbol: symbols[i], roc }));
         const refSymbolStr = findReferenceSymbol(rocs[0], rocs[1], rocs[2]);
         const refSymbolIndex = tradingSymbols.findIndex((ts) => ts.symbol === refSymbolStr);
         const refSymbol = tradingSymbols[refSymbolIndex];
 
-        const bollingerBands = [tradingInfos[0][2], tradingInfos[1][2], tradingInfos[2][2]];
-        const orderBooks = [
-          { ask: Number(tradingInfos[0][0]), bid: Number(tradingInfos[0][1]) },
-          { ask: Number(tradingInfos[1][0]), bid: Number(tradingInfos[1][1]) },
-          { ask: Number(tradingInfos[2][0]), bid: Number(tradingInfos[2][1]) },
-        ];
-        const { abPrice, acPrice, cbPrice, priceA, priceB } = collectDataForArbitrageCalculation(
+        const bollingerBands = tradingInfos.map((info) => info[3]);
+        const orderBooks = tradingInfos.map((info) => ({
+          ask: Number(info[0]),
+          bid: Number(info[1]),
+        }));
+        const prices = tradingInfos.map((info) => Number(info[2]));
+        const {
+          abPrice,
+          acPrice,
+          cbPrice,
+          scenarioA,
+          scenarioB,
+        } = collectDataForArbitrageCalculation({
           orderBooks,
-        );
-        const prices = [abPrice, acPrice, cbPrice];
+          prices,
+        });
         const bbModifier = findBollingerBandsModifier(prices, bollingerBands);
         const profitRatio = calcProfitRatio(prices, bollingerBands);
-
-        const {
-          abAskAmount,
-          abAskPrice,
-          acAskAmount,
-          acAskPrice,
-          cbAskAmount,
-          cbAskPrice,
-          abBidAmount,
-          abBidPrice,
-          acBidAmount,
-          acBidPrice,
-          cbBidAmount,
-          cbBidPrice,
-          result: hasResult,
-        } = findArbitrage({
-          balances: [
-            Number(accountInfo.balances.find((b) => b.asset === tradingAssets[0])!.free),
-            Number(accountInfo.balances.find((b) => b.asset === tradingAssets[1])!.free),
-            Number(accountInfo.balances.find((b) => b.asset === tradingAssets[2])!.free),
-          ],
-          bollingerBands,
-          orderBooks,
-          refSymbolIndex,
-        });
-
-        const resultText = hasResult
-          ? chalk.greenBright("Yay! Let's all-in now!")
-          : chalk.redBright("No luck, I will try again later!");
-
-        serverLog.log(resultText);
 
         calcResultMarkdown.setMarkdown(`
 Ref Pair: ${formatSymbol(refSymbol)}
@@ -270,21 +250,19 @@ AB Price: ${formatNumber(abPrice)}
 AC Price: ${formatNumber(acPrice)}
 CB Price: ${formatNumber(cbPrice)}
 
-Price A     : ${formatNumber(priceA)}
-Price B     : ${formatNumber(priceB)}
+Scenario A  : ${formatNumber(scenarioA)}
+Scenario B  : ${formatNumber(scenarioB)}
 BB Modifier : ${formatNumber(bbModifier)}
 Profit Ratio: ${formatNumber(profitRatio)}
 
-AB Amount: ${formatNumber(abAskAmount || "N/A")} | ${formatNumber(abBidAmount || "N/A")}
-AB Price : ${formatNumber(abAskPrice || "N/A")} | ${formatNumber(abBidPrice || "N/A")}
+AB Amount: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[0], "quantity") : "N/A"}
+AB Price: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[0], "price") : "N/A"}
 
-AC Amount: ${formatNumber(acAskAmount || "N/A")} | ${formatNumber(acBidAmount || "N/A")}
-AC Price : ${formatNumber(acAskPrice || "N/A")} | ${formatNumber(acBidPrice || "N/A")}
+AC Amount: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[1], "quantity") : "N/A"}
+AC Price: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[1], "price") : "N/A"}
 
-CB Amount: ${formatNumber(cbAskAmount || "N/A")} | ${formatNumber(cbBidAmount || "N/A")}
-CB Price : ${formatNumber(cbAskPrice || "N/A")} | ${formatNumber(cbBidPrice || "N/A")}
-
-${resultText}
+CB Amount: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[2], "quantity") : "N/A"}
+CB Price: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[2], "price") : "N/A"}
 `);
       },
     );
@@ -303,14 +281,14 @@ function loadGui(options: GUIOptions) {
     grid.set(0, 4, 4, 4, contrib.lcd, lcdOptions),
     grid.set(0, 8, 4, 4, contrib.lcd, lcdOptions),
   ];
-  const balanceTable = grid.set(4, 0, 7, 3, contrib.table, {
+  const balanceTable = grid.set(4, 0, 6, 3, contrib.table, {
     ...tableOptions,
     label: "My Balances",
     fg: "white",
     interactive: false,
     columnWidth: [6, 15],
   });
-  const orderTable = grid.set(4, 3, 7, 3, contrib.table, {
+  const orderTable = grid.set(4, 3, 6, 3, contrib.table, {
     label: "My Orders",
     fg: "white",
     interactive: false,
@@ -324,7 +302,7 @@ function loadGui(options: GUIOptions) {
     label: "Calculation Result",
     padding: { left: 2, right: 2 },
   } as contrib.Widgets.MarkdownOptions) as contrib.Widgets.MarkdownElement;
-  const serverLog: contrib.Widgets.LogElement = grid.set(11, 0, 7, 6, contrib.log, {
+  const serverLog: contrib.Widgets.LogElement = grid.set(10, 0, 8, 6, contrib.log, {
     label: "Server Log",
     fg: "green",
     interactive: false,
@@ -346,6 +324,10 @@ function loadGui(options: GUIOptions) {
   const orderTableSubscriptions = renderOrderTable(guiItems, options);
   const priceLcdSubscriptions = renderPriceLcds(guiItems, options);
   const tradingInfoMarkdownSubscriptions = renderTradingInfoMarkdown(guiItems, options);
+
+  options.serverLog$.subscribe((log) => {
+    serverLog.log(log);
+  });
 
   setInterval(() => {
     screen.render();

@@ -4,6 +4,13 @@ import { PRICE_GAP, BB_MODIFIER, PROFIT_MARGIN } from "../constants";
 
 const getPrice = (ask: number, bid: number) => (ask + bid) / 2;
 
+export type ArbitrageResult =
+  | {
+      ask: { quantity: number | null; price: number | null };
+      bid: { quantity: number | null; price: number | null };
+    }[]
+  | null;
+
 export function findArbitrage({
   bollingerBands,
   balances,
@@ -16,7 +23,7 @@ export function findArbitrage({
   orderBooks: { ask: number; bid: number }[];
   prices: number[];
   refSymbolIndex: number;
-}) {
+}): ArbitrageResult {
   const {
     currentAbAskPrice,
     currentAbBidPrice,
@@ -34,9 +41,9 @@ export function findArbitrage({
   } = collectDataForArbitrageCalculation({ orderBooks, prices });
 
   // dimension check:
-  if (abPrice/acPrice/cbPrice > 1.5 || abPrice/acPrice/cbPrice < 0.95)
-    throw new Error(" Wrong pairs or pair sequence inserted. please check pairs dimensions.");
-    
+  if (abPrice / acPrice / cbPrice > 1.5 || abPrice / acPrice / cbPrice < 0.95) {
+    throw new Error("Wrong pairs or pair sequence inserted. please check pairs dimensions.");
+  }
 
   const [unitA, unitB, unitC] = balances;
 
@@ -57,12 +64,6 @@ export function findArbitrage({
   let cbBidPrice: number | null = null;
 
   let result = true;
-  //console.log(scenarioA);
-  //console.log(scenarioB);
-  //console.log(1+profitRatio);
-
-  console.log(currentAbBidPrice);
-  console.log(currentAbAskPrice);
 
   if (scenarioA < 1 - profitRatio) {
     if (refSymbolIndex === 2) {
@@ -168,33 +169,23 @@ export function findArbitrage({
     result = false;
   }
 
-
-  console.log(abAskAmount);
-
-  console.log(acBidAmount);
-
-  console.log(cbBidAmount);
-
-  //console.log(acAskPrice);
-  //console.log(cbAskAmount);
-  //console.log(cbAskPrice);
-  return {
-    abAskAmount,
-    abAskPrice,
-    acAskAmount,
-    acAskPrice,
-    cbAskAmount,
-    cbAskPrice,
-    abBidAmount,
-    abBidPrice,
-    acBidAmount,
-    acBidPrice,
-    cbBidAmount,
-    cbBidPrice,
-    result,
-  };
+  return result
+    ? [
+        {
+          ask: { quantity: abAskAmount, price: abAskPrice },
+          bid: { quantity: abBidAmount, price: abBidPrice },
+        },
+        {
+          ask: { quantity: acAskAmount, price: acAskPrice },
+          bid: { quantity: acBidAmount, price: acBidPrice },
+        },
+        {
+          ask: { quantity: cbAskAmount, price: cbAskPrice },
+          bid: { quantity: cbBidAmount, price: cbBidPrice },
+        },
+      ]
+    : null;
 }
-
 
 export function calcBollingerBandsModifier(price: number, bb: BollingerBandsOutput) {
   return 1 + 2 * Math.abs((price - bb.lower) / (bb.upper - bb.lower) - 0.5);
@@ -281,9 +272,5 @@ export function findReferenceSymbol(
   } else if (ca.roc < ab.roc && ca.roc < bc.roc) {
     return ca.symbol;
   }
-  throw new Error("Reference symbol cannot be found");
+  throw new Error("Reference symbol cannot be found.");
 }
-
-
-
-

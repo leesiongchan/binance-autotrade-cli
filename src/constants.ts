@@ -1,7 +1,8 @@
 export const CANDLE_SIZE = 48;
-export const TRADE_SIZE = 20;
+export const ENABLE_GUI = true;
+export const SCREEN_UPDATE_INTERVAL = 500;
 export const TICKTIME_THRESHOLD = 300;
-export const SCREEN_UPDATE_INTERVAL = 1000;
+export const TRADE_SIZE = 20;
 
 export const BB_PERIOD = 20;
 export const ROC_PERIOD = 9;
