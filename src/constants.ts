@@ -1,3 +1,4 @@
+export const ACCOUNT_TYPE: "MARGIN" | "NORMAL" = "MARGIN";
 export const CANDLE_SIZE = 48;
 export const ENABLE_GUI = true;
 export const SCREEN_UPDATE_INTERVAL = 500;

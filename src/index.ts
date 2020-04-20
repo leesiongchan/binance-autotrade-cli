@@ -34,7 +34,7 @@ import { prompt } from "enquirer";
 
 import client from "./utils/api-client";
 import loadGui from "./gui";
-import { TRADE_SIZE, CANDLE_SIZE, ENABLE_GUI } from "./constants";
+import { TRADE_SIZE, CANDLE_SIZE, ENABLE_GUI, ACCOUNT_TYPE } from "./constants";
 import {
   TradingAccount,
   TradingCandle,
@@ -70,6 +70,7 @@ async function run() {
 
   const response: any = await prompt(questions);
   const symbols: string[] = response.symbols;
+  const accountWs = ACCOUNT_TYPE === "MARGIN" ? client.ws.marginUser : client.ws.user;
 
   const accountInfo$ = concat(
     // Initial
@@ -78,7 +79,7 @@ async function run() {
     ),
     // WS
     new Observable<OutboundAccountInfo>((subscriber) => {
-      const ws = client.ws.marginUser((msg) => {
+      const ws = accountWs((msg) => {
         if (msg.eventType === "account") {
           subscriber.next(msg as OutboundAccountInfo);
         }
@@ -109,7 +110,7 @@ async function run() {
     ),
     // WS
     new Observable<ExecutionReport>((subscriber) => {
-      const ws = client.ws.marginUser((msg) => {
+      const ws = accountWs((msg) => {
         if (msg.eventType === "executionReport") {
           subscriber.next(msg as ExecutionReport);
         }
