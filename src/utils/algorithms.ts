@@ -2,7 +2,15 @@ import { BollingerBandsOutput } from "technicalindicators/declarations/volatilit
 
 import { PRICE_GAP, BB_MODIFIER, PROFIT_MARGIN } from "../constants";
 
-const getPrice = (ask: number, bid: number) => (ask + bid) / 2;
+export const calculateDusless = (amount: number, dustDecimals: number): number => {
+  if (Number.isInteger(amount)) {
+    return amount;
+  }
+  const amountString = amount.toFixed(12);
+  const decimalIndex = amountString.indexOf(".");
+  return parseFloat(amountString.slice(0, decimalIndex + dustDecimals + 1));
+};
+export const getPrice = (ask: number, bid: number) => (ask + bid) / 2;
 
 export type ArbitrageResult =
   | {

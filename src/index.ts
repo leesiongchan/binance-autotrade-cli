@@ -11,6 +11,8 @@ import {
   OrderBook,
   OutboundAccountInfo,
   Symbol,
+  SymbolLotSizeFilter,
+  SymbolPriceFilter,
   Trade,
 } from "binance-api-node";
 import { BollingerBandsOutput } from "technicalindicators/declarations/volatility/BollingerBands";
@@ -43,7 +45,7 @@ import {
   TradingTrade,
 } from "./interface";
 import { bollingerBands, roc } from "./utils/operators";
-import { findArbitrage, findReferenceSymbol } from "./utils/algorithms";
+import { findArbitrage, findReferenceSymbol, calculateDusless } from "./utils/algorithms";
 import { formatSymbol } from "./utils/formatter";
 
 const TICKER_LIST = {
@@ -324,19 +326,37 @@ async function run() {
   );
   const newOrders$ = arbitrage$.pipe(
     filter((ar) => ar !== null),
-    map((ar) => {
+    withLatestFrom(tradingSymbols$),
+    map(([ar, tradingSymbols]) => {
       if (!ar) {
-        throw new Error("No arbitrage info for whatever reason?");
+        throw new Error("No arbitrage info for whatever reason.");
       }
-      const newOrders: NewOrder[] = symbols.map((symbol, i) => ({
-        price: (ar[i].ask.price ?? ar[i].bid.price)?.toFixed(4),
-        quantity: (ar[i].ask.quantity ?? ar[i].bid.quantity)?.toFixed(4) || "0",
-        side: ar[i].ask.quantity ? "SELL" : "BUY",
-        symbol,
-        type: "LIMIT",
-      }));
-      if (newOrders.some((newOrder) => !newOrder.price || Number(newOrder.quantity) <= 0)) {
-        throw new Error("You do not have enough quantity to trade.");
+      const newOrders: NewOrder[] = tradingSymbols.map((ts, i) => {
+        const priceFilter = ts.filters.find(
+          (f) => f.filterType === "PRICE_FILTER",
+        ) as SymbolPriceFilter;
+        const lotSizeFilter = ts.filters.find(
+          (f) => f.filterType === "LOT_SIZE",
+        ) as SymbolLotSizeFilter;
+        const priceDustDecimals = priceFilter.tickSize.indexOf("1") - 1;
+        const qtyDustDecimals = lotSizeFilter.stepSize.indexOf("1") - 1;
+
+        const side = ar[i].bid.quantity ? "BUY" : "SELL";
+        let price = side === "SELL" ? ar[i].ask.price : ar[i].bid.price;
+        price = price ? calculateDusless(price, priceDustDecimals) : 0;
+        let quantity = side === "SELL" ? ar[i].ask.quantity : ar[i].bid.quantity;
+        quantity = quantity ? calculateDusless(quantity, qtyDustDecimals) : 0;
+
+        return {
+          price: price.toFixed(ts.quotePrecision),
+          quantity: quantity.toString(),
+          side,
+          symbol: ts.symbol,
+          type: "LIMIT",
+        };
+      });
+      if (newOrders.some((o) => !o.price || Number(o.price) <= 0 || Number(o.quantity) <= 0)) {
+        throw new Error("You do not have enough amount to trade.");
       }
       return newOrders;
     }),
