@@ -406,12 +406,9 @@ async function run() {
             `${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${chalk.redBright(err)}`,
           ),
       ),
-      // retry(),
+      retry(),
     )
-    .subscribe(
-      () => {},
-      (err) => console.log("err", err),
-    );
+    .subscribe();
 }
 
 run();
