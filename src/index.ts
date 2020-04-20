@@ -8,25 +8,16 @@ import {
   ExecutionReport,
   NewOrder,
   Order,
+  OrderBook,
   OutboundAccountInfo,
   Symbol,
   Trade,
 } from "binance-api-node";
 import { BollingerBandsOutput } from "technicalindicators/declarations/volatility/BollingerBands";
-import {
-  Observable,
-  concat,
-  from,
-  interval,
-  combineLatest,
-  merge,
-  of,
-  BehaviorSubject,
-} from "rxjs";
+import { Observable, concat, from, interval, combineLatest, merge, BehaviorSubject } from "rxjs";
 import { first as _first, isEmpty as _isEmpty, last as _last, uniq as _uniq } from "lodash/fp";
 import { format as formatDate } from "date-fns/fp";
 import {
-  catchError,
   concatMap,
   distinctUntilChanged,
   filter,
@@ -36,7 +27,10 @@ import {
   scan,
   shareReplay,
   tap,
+  withLatestFrom,
+  retry,
 } from "rxjs/operators";
+import { prompt } from "enquirer";
 
 import client from "./utils/api-client";
 import loadGui from "./gui";
@@ -52,16 +46,30 @@ import { bollingerBands, roc } from "./utils/operators";
 import { findArbitrage, findReferenceSymbol } from "./utils/algorithms";
 import { formatSymbol } from "./utils/formatter";
 
-const TICKER_LIST = [
-  ["BTCUSDT", "BTCBUSD", "BUSDUSDT"],
-  ["ETHUSDT", "ETHBUSD", "BUSDUSDT"],
-  ["LTCUSDT", "LTCBUSD", "BUSDUSDT"],
-  ["XRPUSDT", "XRPBUSD", "BUSDUSDT"],
-  ["BCHUSDT", "BCHBUSD", "BUSDUSDT"],
-];
+const TICKER_LIST = {
+  "BTC-USDT-BUSD": ["BTCUSDT", "BTCBUSD", "BUSDUSDT"],
+  "ETH-USDT-BUSD": ["ETHUSDT", "ETHBUSD", "BUSDUSDT"],
+  "LTC-USDT-BUSD": ["LTCUSDT", "LTCBUSD", "BUSDUSDT"],
+  "XRP-USDT-BUSD": ["XRPUSDT", "XRPBUSD", "BUSDUSDT"],
+  "BCH-USDT-BUSD": ["BCHUSDT", "BCHBUSD", "BUSDUSDT"],
+};
 
-function run() {
-  const symbols = TICKER_LIST[0];
+async function run() {
+  const questions = [
+    {
+      type: "select",
+      name: "symbols",
+      message: "Select your triangle pair",
+      initial: 0,
+      choices: Object.entries(TICKER_LIST).map(([key, val]) => ({
+        message: key,
+        name: val,
+      })),
+    },
+  ];
+
+  const response: any = await prompt(questions);
+  const symbols: string[] = response.symbols;
 
   const accountInfo$ = concat(
     // Initial
@@ -134,10 +142,10 @@ function run() {
 
   const orderBook$ = concat(
     // Initial
-    // from(symbols.map((symbol) => client.book({ symbol, limit: 5 }))).pipe(
-    //   concatMap((book) => book),
-    //   map<OrderBook, TradingOrderBook>((book, i) => ({ ...book, symbol: symbols[i] })),
-    // ),
+    from(symbols.map((symbol) => client.book({ symbol, limit: 5 }))).pipe(
+      concatMap((book) => book),
+      map<OrderBook, TradingOrderBook>((book, i) => ({ ...book, symbol: symbols[i] })),
+    ),
     // WS
     new Observable<Depth>((subscriber) => {
       const ws = client.ws.depth(symbols, (depth) => {
@@ -264,7 +272,7 @@ function run() {
       }),
     ),
     combineLatest(accountInfo$, tradingAssets$, tradingSymbols$),
-    isOrderInProgress$.pipe(distinctUntilChanged()),
+    isOrderInProgress$.pipe(distinctUntilChanged((x, y) => x === y)),
   ).pipe(
     filter(([, , b]) => b === false),
     map(
@@ -297,16 +305,15 @@ function run() {
         });
       },
     ),
-    distinctUntilChanged(deepEqual),
-    shareReplay(1),
+    distinctUntilChanged((x, y) => deepEqual(x, y)),
+    // shareReplay(1),
   );
-  const execute$ = arbitrage$.pipe(
+  const newOrders$ = arbitrage$.pipe(
     filter((ar) => ar !== null),
-    concatMap(async (ar) => {
+    map((ar) => {
       if (!ar) {
         throw new Error("No arbitrage info for whatever reason?");
       }
-
       const newOrders: NewOrder[] = symbols.map((symbol, i) => ({
         price: (ar[i].ask.price ?? ar[i].bid.price)?.toPrecision(4).toString(),
         quantity: (ar[i].ask.quantity ?? ar[i].bid.quantity)?.toPrecision(4).toString() || "",
@@ -314,11 +321,14 @@ function run() {
         symbol,
         type: "LIMIT",
       }));
-
       if (newOrders.some((newOrder) => !newOrder.price || Number(newOrder.quantity) <= 0)) {
-        throw new Error("You do not have enough quantity to arbitrage.");
+        throw new Error("You do not have enough quantity to trade.");
       }
-
+      return newOrders;
+    }),
+  );
+  const executeOrder$ = newOrders$.pipe(
+    concatMap(async (newOrders) => {
       let orders: Order[];
       isOrderInProgress$.next(true);
       try {
@@ -341,7 +351,8 @@ function run() {
         );
       }),
     ),
-    combineLatest(execute$, tradingSymbols$).pipe(
+    executeOrder$.pipe(
+      withLatestFrom(tradingSymbols$),
       mergeMap(([orders, tradingSymbols]) =>
         orders.map((o) => {
           if (_isEmpty(o)) {
@@ -353,12 +364,12 @@ function run() {
           )}> [${sideColor(o.side)}] ${o.price} (${o.executedQty})`;
         }),
       ),
-      catchError((err) => of(err)),
     ),
-  ).pipe(map((log) => `${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${log}`));
+  );
 
+  let logger: any = console;
   if (ENABLE_GUI) {
-    loadGui({
+    const { serverLog } = loadGui({
       accountInfo$,
       arbitrage$,
       candle$,
@@ -366,15 +377,27 @@ function run() {
       order$,
       orderBook$,
       prices$,
-      serverLog$,
       symbols,
       trade$,
       tradingAssets$,
       tradingSymbols$,
     });
-  } else {
-    serverLog$.subscribe((log) => console.log(log));
+    logger = serverLog;
   }
+
+  serverLog$
+    .pipe(
+      tap(
+        (msg: string) =>
+          logger.log(`${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${msg}`),
+        (err: string) =>
+          logger.log(
+            `${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${chalk.redBright(err)}`,
+          ),
+      ),
+      retry(),
+    )
+    .subscribe();
 }
 
 run();

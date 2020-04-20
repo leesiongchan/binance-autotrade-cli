@@ -5,7 +5,7 @@ import { BollingerBandsOutput } from "technicalindicators/declarations/volatilit
 import { ExchangeInfo, Symbol } from "binance-api-node";
 import { Observable, combineLatest } from "rxjs";
 import { first as _first, last as _last } from "lodash/fp";
-import { map, throttleTime, filter, pairwise, bufferTime, shareReplay } from "rxjs/operators";
+import { map, throttleTime, filter, pairwise, bufferTime } from "rxjs/operators";
 
 import { SCREEN_UPDATE_INTERVAL } from "./constants";
 import {
@@ -42,7 +42,6 @@ interface GUIOptions {
   order$: Observable<TradingOrder>;
   orderBook$: Observable<TradingOrderBook>;
   prices$: Observable<{ [i: string]: string }>;
-  serverLog$: Observable<string>;
   symbols: string[];
   trade$: Observable<TradingTrade>;
   tradingAssets$: Observable<string[]>;
@@ -325,10 +324,6 @@ function loadGui(options: GUIOptions) {
   const priceLcdSubscriptions = renderPriceLcds(guiItems, options);
   const tradingInfoMarkdownSubscriptions = renderTradingInfoMarkdown(guiItems, options);
 
-  options.serverLog$.subscribe((log) => {
-    serverLog.log(log);
-  });
-
   setInterval(() => {
     screen.render();
   }, SCREEN_UPDATE_INTERVAL);
@@ -362,6 +357,8 @@ function loadGui(options: GUIOptions) {
     serverLog.emit("attach");
     tradingInfoMarkdown.emit("attach");
   });
+
+  return guiItems;
 }
 
 export default loadGui;
