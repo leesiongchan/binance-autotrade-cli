@@ -78,7 +78,7 @@ async function run() {
     ),
     // WS
     new Observable<OutboundAccountInfo>((subscriber) => {
-      const ws = client.ws.user((msg) => {
+      const ws = client.ws.marginUser((msg) => {
         if (msg.eventType === "account") {
           subscriber.next(msg as OutboundAccountInfo);
         }
@@ -109,7 +109,7 @@ async function run() {
     ),
     // WS
     new Observable<ExecutionReport>((subscriber) => {
-      const ws = client.ws.user((msg) => {
+      const ws = client.ws.marginUser((msg) => {
         if (msg.eventType === "executionReport") {
           subscriber.next(msg as ExecutionReport);
         }
