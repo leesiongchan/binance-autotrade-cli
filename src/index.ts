@@ -84,9 +84,12 @@ async function run() {
 
   const accountInfo$ = concat(
     // Initial
-    from(accountReq().then((a: any) => ({ ...a, balances: a.userAssets }))).pipe(
-      map<Account, TradingAccount>((ai) => ai),
-    ),
+    from(
+      accountReq().then((a: any) => ({
+        ...a,
+        balances: ACCOUNT_TYPE === "MARGIN" ? a.userAssets : a.balances,
+      })),
+    ).pipe(map<Account, TradingAccount>((ai) => ai)),
     // WS
     new Observable<OutboundAccountInfo>((subscriber) => {
       const ws = accountWs((msg) => {
