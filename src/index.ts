@@ -397,7 +397,7 @@ async function run() {
   );
 
   let logger: any = console;
-  if (!ENABLE_GUI) {
+  if (ENABLE_GUI) {
     const { serverLog } = loadGui({
       accountInfo$,
       arbitrage$,
