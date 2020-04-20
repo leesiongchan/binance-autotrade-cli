@@ -408,9 +408,11 @@ async function run() {
       mergeMap(([orders, tradingSymbols]) =>
         orders.map((o) => {
           const sideColor = o.side === "SELL" ? chalk.redBright : chalk.greenBright;
-          const symbol = `<${formatSymbol(tradingSymbols.find((ts) => ts.symbol === o.symbol)!)}>`;
-          const side = sideColor(`[${o.side}]`) + (o.side === "BUY" ? " " : "");
-          return `${side} ${symbol} P: ${o.price} | Q: ${o.executedQty}`;
+          const symbol = `<${formatSymbol(
+            tradingSymbols.find((ts) => ts.symbol === o.symbol)!,
+          )}>`.padStart(11);
+          const side = sideColor(`[${o.side}]`.padStart(6));
+          return `${side} ${symbol} P: ${o.price.padStart(13)} | Q: ${o.executedQty}`;
         }),
       ),
     ),
