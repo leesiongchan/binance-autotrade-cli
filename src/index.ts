@@ -1,5 +1,5 @@
-import * as chalk from "chalk";
-import * as deepEqual from "fast-deep-equal";
+import chalk from "chalk";
+import deepEqual from "fast-deep-equal";
 import {
   Account,
   Candle,
@@ -17,7 +17,7 @@ import {
 } from "binance-api-node";
 import { BollingerBandsOutput } from "technicalindicators/declarations/volatility/BollingerBands";
 import { Observable, concat, from, interval, combineLatest, merge, BehaviorSubject } from "rxjs";
-import { first as _first, isEmpty as _isEmpty, last as _last, uniq as _uniq } from "lodash/fp";
+import { isEmpty as _isEmpty, last as _last, uniq as _uniq } from "lodash/fp";
 import { format as formatDate } from "date-fns/fp";
 import {
   concatMap,
@@ -26,11 +26,12 @@ import {
   map,
   mergeMap,
   mergeMapTo,
+  pairwise,
+  retry,
   scan,
   shareReplay,
   tap,
   withLatestFrom,
-  retry,
 } from "rxjs/operators";
 import { prompt } from "enquirer";
 
@@ -45,7 +46,7 @@ import {
   TradingTrade,
 } from "./interface";
 import { bollingerBands, roc } from "./utils/operators";
-import { findArbitrage, findReferenceSymbol, calculateDusless } from "./utils/algorithms";
+import { findArbitrage, findReferenceSymbol, calcDustless } from "./utils/algorithms";
 import { formatSymbol } from "./utils/formatter";
 
 const TICKER_LIST = {
@@ -156,28 +157,37 @@ async function run() {
   ).pipe(shareReplay(100));
   const exchangeInfo$ = from(client.exchangeInfo()).pipe(shareReplay(1));
 
-  const orderBook$ = concat(
-    // Initial
-    from(symbols.map((symbol) => client.book({ symbol, limit: 5 }))).pipe(
-      concatMap((book) => book),
-      map<OrderBook, TradingOrderBook>((book, i) => ({ ...book, symbol: symbols[i] })),
+  // ref: https://binance-docs.github.io/apidocs/spot/en/#how-to-manage-a-local-order-book-correctly
+  const orderBook$ = merge(
+    ...symbols.map((symbol) =>
+      new Observable<Depth>((subscriber) => {
+        const ws = client.ws.depth(symbol, (depth) => {
+          subscriber.next(depth);
+        });
+        return () => {
+          ws();
+        };
+      }).pipe(
+        pairwise(),
+        filter(
+          ([prevOrderBook, orderBook]) =>
+            prevOrderBook.finalUpdateId + 1 === orderBook.firstUpdateId,
+        ),
+        map(([, orderBook]) => ({
+          ...orderBook,
+          askDepth: orderBook.askDepth.filter((ask) => Number(ask.quantity) > 0),
+          bidDepth: orderBook.bidDepth.filter((bid) => Number(bid.quantity) > 0),
+        })),
+        withLatestFrom(from(client.book({ symbol, limit: 5 }))),
+        filter(([obEv, ob]) => obEv.finalUpdateId > ob.lastUpdateId),
+        map<[Depth, OrderBook], TradingOrderBook>(([book]) => ({
+          asks: book.askDepth,
+          bids: book.bidDepth,
+          symbol: book.symbol,
+        })),
+      ),
     ),
-    // WS
-    new Observable<Depth>((subscriber) => {
-      const ws = client.ws.depth(symbols, (depth) => {
-        subscriber.next(depth);
-      });
-      return () => {
-        ws();
-      };
-    }).pipe(
-      map<Depth, TradingOrderBook>((book) => ({
-        asks: book.askDepth,
-        bids: book.bidDepth,
-        symbol: book.symbol,
-      })),
-    ),
-  ).pipe(shareReplay(1));
+  ).pipe(shareReplay(30));
 
   const candle$ = concat(
     // Initial
@@ -262,42 +272,48 @@ async function run() {
 
   const isOrderInProgress$ = new BehaviorSubject(false);
   const arbitrage$ = combineLatest(
-    combineLatest(
-      ...symbols.map((symbol) => {
-        const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
-        const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
-        return combineLatest(
-          symbolOrderBook$.pipe(
-            map((b) => _first(b.asks.map((b) => b.price))),
-            filter(Boolean),
-          ),
-          symbolOrderBook$.pipe(
-            map((b) => _first(b.bids.map((b) => b.price))),
-            filter(Boolean),
-          ),
-          symbolCandle$.pipe(map((c) => c.close)),
-          symbolCandle$.pipe(
-            bollingerBands(),
-            map((bb) => _last(bb)),
-          ),
-          symbolCandle$.pipe(
-            roc(),
-            map((roc) => _last(roc)),
-          ),
-        );
-      }),
-    ),
-    combineLatest(accountInfo$, tradingAssets$, tradingSymbols$),
-    isOrderInProgress$.pipe(distinctUntilChanged((x, y) => x === y)),
+    ...symbols.map((symbol) => {
+      const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
+      const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
+      return combineLatest(
+        symbolOrderBook$.pipe(
+          map((b) => b.asks[0]?.price),
+          filter((b) => !!b),
+        ),
+        symbolOrderBook$.pipe(
+          map((b) => b.bids[0]?.price),
+          filter((b) => !!b),
+        ),
+        symbolCandle$.pipe(map((c) => c.close)),
+        symbolCandle$.pipe(
+          bollingerBands(),
+          map((bb) => _last(bb)),
+          filter((b) => !!b),
+        ),
+        symbolCandle$.pipe(
+          roc(),
+          map((roc) => _last(roc)),
+          filter((b) => !!b),
+        ),
+      );
+    }),
   ).pipe(
-    filter(([, , b]) => b === false),
+    withLatestFrom(
+      accountInfo$,
+      tradingAssets$,
+      tradingSymbols$,
+      isOrderInProgress$.pipe(distinctUntilChanged((x, y) => x === y)),
+    ),
+    filter(([, , , , b]) => b === false),
     map(
-      ([tradingInfos, [accountInfo, tradingAssets, tradingSymbols]]: [
+      ([tradingInfos, accountInfo, tradingAssets, tradingSymbols]: [
         [string, string, string, BollingerBandsOutput, number][],
-        [TradingAccount, string[], Symbol[]],
+        TradingAccount,
+        string[],
+        Symbol[],
         boolean,
       ]) => {
-        const rocs = tradingInfos.map(([, , , , roc], i) => ({ symbol: symbols[i], roc }));
+        const rocs = tradingInfos.map((info, i) => ({ symbol: symbols[i], roc: info[4] }));
         const refSymbolStr = findReferenceSymbol(rocs[0], rocs[1], rocs[2]);
         const refSymbolIndex = tradingSymbols.findIndex((ts) => ts.symbol === refSymbolStr);
 
@@ -329,7 +345,7 @@ async function run() {
     withLatestFrom(tradingSymbols$),
     map(([ar, tradingSymbols]) => {
       if (!ar) {
-        throw new Error("No arbitrage info for whatever reason.");
+        throw new Error("No arbitrage info for whatever reason. (index.ts L339)");
       }
       const newOrders: NewOrder[] = tradingSymbols.map((ts, i) => {
         const priceFilter = ts.filters.find(
@@ -343,9 +359,9 @@ async function run() {
 
         const side = ar[i].bid.quantity ? "BUY" : "SELL";
         let price = side === "SELL" ? ar[i].ask.price : ar[i].bid.price;
-        price = price ? calculateDusless(price, priceDustDecimals) : 0;
+        price = price ? calcDustless(price, priceDustDecimals) : 0;
         let quantity = side === "SELL" ? ar[i].ask.quantity : ar[i].bid.quantity;
-        quantity = quantity ? calculateDusless(quantity, qtyDustDecimals) : 0;
+        quantity = quantity ? calcDustless(quantity, qtyDustDecimals) : 0;
 
         return {
           price: price.toFixed(ts.quotePrecision),
@@ -360,6 +376,8 @@ async function run() {
       }
       return newOrders;
     }),
+    // Don't make the same order twice!
+    // distinctUntilChanged((x, y) => deepEqual(x, y)),
   );
   const executeOrder$ = newOrders$.pipe(
     concatMap(async (newOrders) => {

@@ -1,6 +1,8 @@
 {
   "scripts": {
-    "start": "ts-node -r dotenv/config src/index.ts",
+    "build": "tsc",
+    "start": "node -r dotenv/config dist/index.js",
+    "start:dev": "ts-node -r dotenv/config src/index.ts",
     "test": "jest --setupFiles dotenv/config"
   },
   "dependencies": {

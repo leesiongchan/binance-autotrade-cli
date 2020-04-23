@@ -1,11 +1,11 @@
-import * as blessed from "blessed";
-import * as chalk from "chalk";
-import * as contrib from "blessed-contrib";
+import blessed from "blessed";
+import chalk from "chalk";
+import contrib from "blessed-contrib";
 import { BollingerBandsOutput } from "technicalindicators/declarations/volatility/BollingerBands";
 import { ExchangeInfo, Symbol } from "binance-api-node";
 import { Observable, combineLatest } from "rxjs";
-import { first as _first, last as _last } from "lodash/fp";
-import { map, throttleTime, filter, pairwise, bufferTime } from "rxjs/operators";
+import { last as _last } from "lodash/fp";
+import { map, throttleTime, filter, pairwise, bufferTime, withLatestFrom } from "rxjs/operators";
 
 import { SCREEN_UPDATE_INTERVAL } from "./constants";
 import {
@@ -55,18 +55,15 @@ function renderPriceLcds(gui: GUIItems, options: GUIOptions) {
   const { candle$, tradingSymbols$, symbols } = options;
 
   const mainSubscription = combineLatest(
-    combineLatest(
-      symbols.map((s) =>
-        candle$.pipe(
-          filter((c) => c.symbol === s),
-          map((c) => c.close),
-          pairwise(),
-        ),
+    symbols.map((s) =>
+      candle$.pipe(
+        filter((c) => c.symbol === s),
+        map((c) => c.close),
+        pairwise(),
       ),
     ),
-    tradingSymbols$,
   )
-    .pipe(throttleTime(throttleTimeInterval))
+    .pipe(withLatestFrom(tradingSymbols$), throttleTime(throttleTimeInterval))
     .subscribe(([prices, tradingSymbols]) => {
       prices.forEach(([prevPrice, price], i) => {
         const priceColor = prevPrice > price ? chalk.redBright : chalk.greenBright;
@@ -104,9 +101,13 @@ function renderOrderTable(gui: GUIItems, options: GUIOptions) {
   const { balanceTable } = gui;
   const { order$ } = options;
 
-  const mainSubscription = combineLatest(order$.pipe(bufferTime(1000)))
-    .pipe(throttleTime(throttleTimeInterval))
-    .subscribe(([orders]) => {
+  const mainSubscription = order$
+    .pipe(
+      bufferTime(1000),
+      throttleTime(throttleTimeInterval),
+      filter((orders) => orders.length > 0),
+    )
+    .subscribe((orders) => {
       balanceTable.setData({
         headers: [" Pair", " Price", " QTY", " Side"],
         data: orders.map((o) => [o.symbol, o.price, o.origQty, o.side]),
@@ -121,61 +122,58 @@ function renderTradingInfoMarkdown(gui: GUIItems, options: GUIOptions) {
   const { candle$, orderBook$, tradingAssets$, tradingSymbols$, symbols } = options;
 
   const mainSubscription = combineLatest(
-    combineLatest(
-      ...symbols.map((symbol) => {
-        const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
-        const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
-        return combineLatest(
-          symbolOrderBook$.pipe(
-            map((b) => _first(b.asks.map((b) => b.price))),
-            filter(Boolean),
-            pairwise(),
-          ),
-          symbolOrderBook$.pipe(
-            map((b) => _first(b.bids.map((b) => b.price))),
-            filter(Boolean),
-            pairwise(),
-          ),
-          symbolCandle$.pipe(
-            bollingerBands(),
-            map((bb) => _last(bb)),
-          ),
-          symbolCandle$.pipe(
-            roc(),
-            map((roc) => _last(roc)),
-          ),
-        );
-      }),
-    ),
-    combineLatest(tradingAssets$, tradingSymbols$),
+    symbols.map((symbol) => {
+      const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
+      const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
+      return combineLatest(
+        symbolOrderBook$.pipe(
+          map((b) => b.asks[0]?.price),
+          filter((b) => !!b),
+          pairwise(),
+        ),
+        symbolOrderBook$.pipe(
+          map((b) => b.bids[0]?.price),
+          filter((b) => !!b),
+          pairwise(),
+        ),
+        symbolCandle$.pipe(
+          bollingerBands(),
+          map((bb) => _last(bb)),
+          filter((b) => !!b),
+        ),
+        symbolCandle$.pipe(
+          roc(),
+          map((roc) => _last(roc)),
+          filter((b) => !!b),
+        ),
+      );
+    }),
   )
-    .pipe(throttleTime(throttleTimeInterval))
-    .subscribe(
-      ([tradingInfos, [tradingAssets, tradingSymbols]]: [
-        [[string, string], [string, string], BollingerBandsOutput, number][],
-        [string[], Symbol[]],
-      ]) => {
-        const priceInfo = tradingInfos.map(([[prevAsk, ask], [prevBid, bid], bb, roc], i) => {
-          const pair = tradingSymbols.find((ts) => ts.symbol === symbols[i])!;
-          const askColor = prevAsk > ask ? chalk.redBright : chalk.greenBright;
-          const bidColor = prevBid > bid ? chalk.redBright : chalk.greenBright;
-          return `
+    .pipe(withLatestFrom(tradingAssets$, tradingSymbols$), throttleTime(throttleTimeInterval))
+    .subscribe(([tradingInfos, tradingAssets, tradingSymbols]) => {
+      const priceInfo = tradingInfos.map(([[prevAsk, ask], [prevBid, bid], bb, roc], i) => {
+        if (!prevAsk || !ask || !prevBid || !bid || !bb || !roc) {
+          throw new Error("Error for whatever reason. (gui.ts L150)");
+        }
+        const pair = tradingSymbols.find((ts) => ts.symbol === symbols[i])!;
+        const askColor = prevAsk > ask ? chalk.redBright : chalk.greenBright;
+        const bidColor = prevBid > bid ? chalk.redBright : chalk.greenBright;
+        return `
 _${formatSymbol(pair)}_
 Ask: ${askColor(formatNumber(ask))} (${askColor(formatNumber(Number(ask) - Number(prevAsk)))})
 Bid: ${bidColor(formatNumber(bid))} (${bidColor(formatNumber(Number(bid) - Number(prevBid)))})
 BB : ${formatNumber(bb.lower)}/${formatNumber(bb.middle)}/${formatNumber(bb.upper)}
 ROC: ${formatNumber(roc)}
 `;
-        });
+      });
 
-        tradingInfoMarkdown.setMarkdown(`
+      tradingInfoMarkdown.setMarkdown(`
 Triangle: ${tradingAssets.join("-")}
 ===
 
 ${priceInfo.join("\n")}
 `);
-      },
-    );
+    });
 
   return [mainSubscription];
 }
@@ -191,12 +189,12 @@ function renderCalcResultMarkdown(gui: GUIItems, options: GUIOptions) {
         const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
         return combineLatest(
           symbolOrderBook$.pipe(
-            map((b) => _first(b.asks.map((b) => b.price))),
-            filter(Boolean),
+            map((b) => b.asks[0]?.price),
+            filter((b) => !!b),
           ),
           symbolOrderBook$.pipe(
-            map((b) => _first(b.bids.map((b) => b.price))),
-            filter(Boolean),
+            map((b) => b.bids[0]?.price),
+            filter((b) => !!b),
           ),
           symbolCandle$.pipe(map((c) => c.close)),
           symbolCandle$.pipe(
@@ -210,13 +208,13 @@ function renderCalcResultMarkdown(gui: GUIItems, options: GUIOptions) {
         );
       }),
     ),
-    combineLatest(arbitrage$, tradingSymbols$),
+    arbitrage$,
   )
-    .pipe(throttleTime(throttleTimeInterval))
+    .pipe(withLatestFrom(tradingSymbols$), throttleTime(throttleTimeInterval))
     .subscribe(
-      ([tradingInfos, [arbitrageResult, tradingSymbols]]: [
-        [string, string, string, BollingerBandsOutput, number][],
-        [ArbitrageResult, Symbol[]],
+      ([[tradingInfos, arbitrageResult], tradingSymbols]: [
+        [[string, string, string, BollingerBandsOutput, number][], ArbitrageResult],
+        Symbol[],
       ]) => {
         const rocs = tradingInfos.map(([, , , , roc], i) => ({ symbol: symbols[i], roc }));
         const refSymbolStr = findReferenceSymbol(rocs[0], rocs[1], rocs[2]);
@@ -255,13 +253,13 @@ BB Modifier : ${formatNumber(bbModifier)}
 Profit Ratio: ${formatNumber(profitRatio)}
 
 AB Amount: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[0], "quantity") : "N/A"}
-AB Price: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[0], "price") : "N/A"}
+AB Price : ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[0], "price") : "N/A"}
 
 AC Amount: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[1], "quantity") : "N/A"}
-AC Price: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[1], "price") : "N/A"}
+AC Price : ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[1], "price") : "N/A"}
 
 CB Amount: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[2], "quantity") : "N/A"}
-CB Price: ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[2], "price") : "N/A"}
+CB Price : ${!!arbitrageResult ? formatArbitrageItem(arbitrageResult[2], "price") : "N/A"}
 `);
       },
     );
@@ -291,7 +289,7 @@ function loadGui(options: GUIOptions) {
     label: "My Orders",
     fg: "white",
     interactive: false,
-    columnWidth: [10, 8, 8, 24, 6],
+    columnWidth: [10, 8, 8, 24],
   });
   const tradingInfoMarkdown = grid.set(4, 6, 14, 3, contrib.markdown, {
     label: "Trading Information",
@@ -303,7 +301,6 @@ function loadGui(options: GUIOptions) {
   } as contrib.Widgets.MarkdownOptions) as contrib.Widgets.MarkdownElement;
   const serverLog: contrib.Widgets.LogElement = grid.set(10, 0, 8, 6, contrib.log, {
     label: "Server Log",
-    fg: "green",
     interactive: false,
     padding: { left: 2, right: 2 },
   } as contrib.Widgets.LogOptions);
@@ -320,7 +317,7 @@ function loadGui(options: GUIOptions) {
 
   const balanceTableSubscriptions = renderBalanceTable(guiItems, options);
   const calcResultMarkdownSubscriptions = renderCalcResultMarkdown(guiItems, options);
-  const orderTableSubscriptions = renderOrderTable(guiItems, options);
+  // const orderTableSubscriptions = renderOrderTable(guiItems, options);
   const priceLcdSubscriptions = renderPriceLcds(guiItems, options);
   const tradingInfoMarkdownSubscriptions = renderTradingInfoMarkdown(guiItems, options);
 
@@ -335,9 +332,9 @@ function loadGui(options: GUIOptions) {
     calcResultMarkdownSubscriptions.forEach((subscription) => {
       subscription.unsubscribe();
     });
-    orderTableSubscriptions.forEach((subscription) => {
-      subscription.unsubscribe();
-    });
+    // orderTableSubscriptions.forEach((subscription) => {
+    //   subscription.unsubscribe();
+    // });
     priceLcdSubscriptions.forEach((subscription) => {
       subscription.unsubscribe();
     });
