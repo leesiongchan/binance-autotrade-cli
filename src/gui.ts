@@ -45,6 +45,7 @@ interface GUIOptions {
   symbols: string[];
   trade$: Observable<TradingTrade>;
   tradingAssets$: Observable<string[]>;
+  tradingInfos$: Observable<[string, string, string, BollingerBandsOutput, number][]>;
   tradingSymbols$: Observable<Symbol[]>;
 }
 

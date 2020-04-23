@@ -1,3 +1,4 @@
+import BlessedContrib from "blessed-contrib";
 import chalk from "chalk";
 import deepEqual from "fast-deep-equal";
 import {
@@ -10,10 +11,10 @@ import {
   Order,
   OrderBook,
   OutboundAccountInfo,
-  Symbol,
   SymbolLotSizeFilter,
   SymbolPriceFilter,
   Trade,
+  PartialDepth,
 } from "binance-api-node";
 import { BollingerBandsOutput } from "technicalindicators/declarations/volatility/BollingerBands";
 import { Observable, concat, from, interval, combineLatest, merge, BehaviorSubject } from "rxjs";
@@ -37,6 +38,7 @@ import { prompt } from "enquirer";
 
 import client from "./utils/api-client";
 import loadGui from "./gui";
+import logger from "./utils/logger";
 import { TRADE_SIZE, CANDLE_SIZE, ENABLE_GUI, ACCOUNT_TYPE, TEST_MODE } from "./constants";
 import {
   TradingAccount,
@@ -157,8 +159,26 @@ async function run() {
   ).pipe(shareReplay(100));
   const exchangeInfo$ = from(client.exchangeInfo()).pipe(shareReplay(1));
 
+  const orderBookPartial$ = new Observable<PartialDepth>((subscriber) => {
+    // WS
+    const ws = client.ws.partialDepth(
+      symbols.map((symbol) => ({ symbol, level: 5 })),
+      (depth) => {
+        subscriber.next(depth);
+      },
+    );
+    return () => {
+      ws();
+    };
+  }).pipe(
+    map<PartialDepth, TradingOrderBook>((book) => ({
+      asks: book.asks,
+      bids: book.bids,
+      symbol: book.symbol,
+    })),
+  );
   // ref: https://binance-docs.github.io/apidocs/spot/en/#how-to-manage-a-local-order-book-correctly
-  const orderBook$ = merge(
+  const orderBookFull$ = merge(
     ...symbols.map((symbol) =>
       new Observable<Depth>((subscriber) => {
         const ws = client.ws.depth(symbol, (depth) => {
@@ -187,7 +207,8 @@ async function run() {
         })),
       ),
     ),
-  ).pipe(shareReplay(30));
+  );
+  const orderBook$ = orderBookFull$.pipe(shareReplay(1));
 
   const candle$ = concat(
     // Initial
@@ -269,9 +290,7 @@ async function run() {
     map((ts) => _uniq(ts.flatMap((s) => [s.baseAsset, s.quoteAsset]))),
     shareReplay(1),
   );
-
-  const isOrderInProgress$ = new BehaviorSubject(false);
-  const arbitrage$ = combineLatest(
+  const tradingInfos$ = combineLatest<[string, string, string, BollingerBandsOutput, number][]>(
     ...symbols.map((symbol) => {
       const symbolOrderBook$ = orderBook$.pipe(filter((b) => b.symbol === symbol));
       const symbolCandle$ = candle$.pipe(filter((c) => c.symbol === symbol));
@@ -297,7 +316,10 @@ async function run() {
         ),
       );
     }),
-  ).pipe(
+  ).pipe(shareReplay(1));
+
+  const isOrderInProgress$ = new BehaviorSubject(false);
+  const arbitrage$ = tradingInfos$.pipe(
     withLatestFrom(
       accountInfo$,
       tradingAssets$,
@@ -305,38 +327,30 @@ async function run() {
       isOrderInProgress$.pipe(distinctUntilChanged((x, y) => x === y)),
     ),
     filter(([, , , , b]) => b === false),
-    map(
-      ([tradingInfos, accountInfo, tradingAssets, tradingSymbols]: [
-        [string, string, string, BollingerBandsOutput, number][],
-        TradingAccount,
-        string[],
-        Symbol[],
-        boolean,
-      ]) => {
-        const rocs = tradingInfos.map((info, i) => ({ symbol: symbols[i], roc: info[4] }));
-        const refSymbolStr = findReferenceSymbol(rocs[0], rocs[1], rocs[2]);
-        const refSymbolIndex = tradingSymbols.findIndex((ts) => ts.symbol === refSymbolStr);
+    map(([tradingInfos, accountInfo, tradingAssets, tradingSymbols]) => {
+      const rocs = tradingInfos.map((info, i) => ({ symbol: symbols[i], roc: info[4] }));
+      const refSymbolStr = findReferenceSymbol(rocs[0], rocs[1], rocs[2]);
+      const refSymbolIndex = tradingSymbols.findIndex((ts) => ts.symbol === refSymbolStr);
 
-        const balances = tradingAssets.map((asset) => {
-          const balance = accountInfo.balances.find((b) => b.asset === asset)!;
-          return Number(balance.free) - Number(balance.locked);
-        });
-        const bollingerBands = tradingInfos.map((info) => info[3]);
-        const orderBooks = tradingInfos.map((info) => ({
-          ask: Number(info[0]),
-          bid: Number(info[1]),
-        }));
-        const prices = tradingInfos.map((info) => Number(info[2]));
+      const balances = tradingAssets.map((asset) => {
+        const balance = accountInfo.balances.find((b) => b.asset === asset)!;
+        return Number(balance.free) - Number(balance.locked);
+      });
+      const bollingerBands = tradingInfos.map((info) => info[3]);
+      const orderBooks = tradingInfos.map((info) => ({
+        ask: Number(info[0]),
+        bid: Number(info[1]),
+      }));
+      const prices = tradingInfos.map((info) => Number(info[2]));
 
-        return findArbitrage({
-          balances,
-          prices,
-          bollingerBands,
-          orderBooks,
-          refSymbolIndex,
-        });
-      },
-    ),
+      return findArbitrage({
+        balances,
+        prices,
+        bollingerBands,
+        orderBooks,
+        refSymbolIndex,
+      });
+    }),
     distinctUntilChanged((x, y) => deepEqual(x, y)),
     // shareReplay(1),
   );
@@ -436,7 +450,7 @@ async function run() {
     ),
   );
 
-  let logger: any = console;
+  let serverLogger: BlessedContrib.Widgets.LogElement | undefined;
   if (ENABLE_GUI) {
     const { serverLog } = loadGui({
       accountInfo$,
@@ -449,20 +463,25 @@ async function run() {
       symbols,
       trade$,
       tradingAssets$,
+      tradingInfos$,
       tradingSymbols$,
     });
-    logger = serverLog;
+    serverLogger = serverLog;
   }
 
   serverLog$
     .pipe(
       tap(
-        (msg: string) =>
-          logger.log(`${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${msg}`),
-        (err: string) =>
-          logger.log(
+        (msg: string) => {
+          logger.info(msg);
+          serverLogger?.log(`${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${msg}`);
+        },
+        (err: string) => {
+          logger.error(err);
+          serverLogger?.log(
             `${chalk.grey(`${formatDate("HH:mm:ss")(new Date())}:`)} ${chalk.redBright(err)}`,
-          ),
+          );
+        },
       ),
       retry(),
     )
