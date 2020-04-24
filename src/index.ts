@@ -214,7 +214,7 @@ async function run() {
     // Initial
     from(
       symbols.map((symbol) =>
-        client.candles({ symbol, limit: CANDLE_SIZE, interval: CandleChartInterval.ONE_HOUR }),
+        client.candles({ symbol, limit: CANDLE_SIZE, interval: CandleChartInterval.ONE_MINUTE }),
       ),
     ).pipe(
       concatMap((candles) => candles),
@@ -222,7 +222,7 @@ async function run() {
     ),
     // WS
     new Observable<Candle>((subscriber) => {
-      const ws = client.ws.candles(symbols, CandleChartInterval.ONE_HOUR, (candle) => {
+      const ws = client.ws.candles(symbols, CandleChartInterval.ONE_MINUTE, (candle) => {
         subscriber.next(candle);
       });
       return () => {
@@ -483,9 +483,14 @@ async function run() {
           );
         },
       ),
-      retry(),
+      retry(10),
     )
-    .subscribe();
+    .subscribe(
+      () => {},
+      (err) => {
+        logger.error(err);
+      },
+    );
 }
 
 run();
